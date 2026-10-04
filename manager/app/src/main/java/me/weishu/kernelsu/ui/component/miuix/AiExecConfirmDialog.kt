@@ -47,7 +47,7 @@ fun AiExecConfirmDialogMiuix(
     onDismissRequest: () -> Unit,
 ) {
     val pending = request ?: return
-    // User decision 2026-10-04 (m04766): the STRICT gate is a single explicit tap. The payload in
+    // The STRICT gate is a single explicit tap. The payload in
     // the terminal block, the red warning and the error-coloured button carry the weight; no
     // keyword typing is required any more, here or in the access-scope elevation dialog.
     OverlayDialog(

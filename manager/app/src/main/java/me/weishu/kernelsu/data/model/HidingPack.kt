@@ -83,7 +83,7 @@ object HidingPackIds {
 
     /**
      * Base set of the one-tap hide flow: visible `module` entries whose id is in here.
-     * `Violet` was removed together with its pack entry (user m03681).
+     * `Violet` was removed together with its pack entry.
      */
     val oneKeyBase: Set<String> = setOf(HYBRID_MOUNT, ZYGISKSU, "tricky_store", "hma_oss_zygisk")
 }

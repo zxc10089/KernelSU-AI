@@ -50,7 +50,7 @@ class HideEnvironmentViewModel(
     val uiState: StateFlow<HideEnvironmentUiState> = _uiState.asStateFlow()
 
     /**
-     * Every install goes through this lock: the root shell is shared and the frozen contract
+     * Every install goes through this lock: the root shell is shared and the install contract
      * forbids concurrent installs, so a batch step and a single-row install can never overlap.
      */
     private val installMutex = Mutex()

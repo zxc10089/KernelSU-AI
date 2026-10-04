@@ -103,9 +103,8 @@ data class HideEnvironmentUiState(
 
     /**
      * What the "hiding resource pack" card renders:
-     *  * the detectors are gone (they are offered by the quick-install card only, user m03683);
-     *  * the PathMask variants are collapsed to the one that matches the running kernel
-     *    (user m03682: "识别当前内核版本 / 其他的隐藏掉").
+     *  * the detectors are gone (they are offered by the quick-install card only);
+     *  * the PathMask variants are collapsed to the one that matches the running kernel.
      *
      * If no variant matches — unparsable or unknown kernel release — every variant stays visible:
      * an unanswerable kernel must never turn the section into a dead end. The six variants all stay

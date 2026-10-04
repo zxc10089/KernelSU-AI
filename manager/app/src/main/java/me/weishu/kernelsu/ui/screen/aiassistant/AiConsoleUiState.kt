@@ -58,7 +58,7 @@ data class AiConsoleMessage(
  *
  * The texts travel as string-resource ids plus a language-neutral payload so the gate is localised:
  * the console also runs on en-US devices, where a Chinese-only safety dialog would defeat informed
- * consent (design review m02721, P1-1).
+ * consent.
  */
 sealed interface AiConfirmRequest {
     val actionId: Long

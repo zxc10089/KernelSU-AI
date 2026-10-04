@@ -22,9 +22,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
  * Confirmation for widening the file access scope, Miuix flavour.
  *
  * Widening is the one setting that turns a chat assistant into something that can read the device
- * file system, so it stays a separate, deliberate step that names the target scope. The user
- * decided on 2026-10-04 (m04766) that a plain tap on the confirm button is enough, so the typed
- * keyword gate was removed. Narrowing never reaches this dialog.
+ * file system, so it stays a separate, deliberate step that names the target scope. A plain tap on
+ * the confirm button is enough, so the typed keyword gate was removed. Narrowing never reaches
+ * this dialog.
  */
 @Composable
 fun AiScopeElevationDialogMiuix(

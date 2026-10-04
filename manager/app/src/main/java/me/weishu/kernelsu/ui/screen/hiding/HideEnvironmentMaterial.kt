@@ -205,7 +205,7 @@ private fun EnvironmentStatusColumnMaterial(uiState: HideEnvironmentUiState) {
                 )
             }
             add {
-                // One row only (user m03679): title + the user-facing disclaimer as summary.
+                // One row only: title + the user-facing disclaimer as summary.
                 // hide_environment_risk_keybox / _size stay defined but are no longer rendered.
                 StatusRow(
                     icon = Icons.Filled.BugReport,
@@ -465,7 +465,7 @@ private fun HidingPackColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                 }
 
                 // bundleEntries = visible minus detectors (quick-install card only) and with the
-                // PathMask variants collapsed to the branch matching this kernel (m03682/m03683).
+                // PathMask variants collapsed to the branch matching this kernel.
                 HidingPackState.Ready -> uiState.bundleEntries.forEach { entry ->
                     add { HidingPackEntryMaterial(uiState, entry, actions) }
                 }

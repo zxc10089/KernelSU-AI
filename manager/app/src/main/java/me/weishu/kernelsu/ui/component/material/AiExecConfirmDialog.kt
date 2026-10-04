@@ -37,8 +37,7 @@ fun AiExecConfirmDialogMaterial(
     onDismissRequest: () -> Unit,
 ) {
     val pending = request ?: return
-    // User decision 2026-10-04 (m04766): the STRICT gate is a single explicit tap (see the Miuix
-    // flavour for the full rationale).
+    // The STRICT gate is a single explicit tap (see the Miuix flavour for the full rationale).
     AlertDialog(
         onDismissRequest = onDismissRequest,
         title = {

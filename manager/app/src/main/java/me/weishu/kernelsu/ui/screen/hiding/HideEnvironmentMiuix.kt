@@ -226,11 +226,10 @@ private fun EnvironmentStatusCardMiuix(uiState: HideEnvironmentUiState) {
             title = stringResource(id = R.string.hide_environment_selinux_status),
             summary = uiState.selinuxStatus
         )
-        // The risk notice occupies ONE row (user m03679: "风险提示仅占用一个地方 / 不用占用三个地方",
-        // "下面那些给开发者看的去除掉", "加入免责声明即可"): the user-facing disclaimer is the summary,
-        // and the keybox/private-key + APK-size lines are gone from the screen.
-        // hide_environment_risk_keybox / _size stay defined (the frozen contract forbids changing the
-        // 33 existing hide_environment* key names) but are intentionally not rendered any more.
+        // The risk notice occupies ONE row: the disclaimer is the summary, while the
+        // keybox/private-key and APK-size lines are gone from the developer-facing view.
+        // hide_environment_risk_keybox / _size stay defined (renaming existing
+        // hide_environment* string keys is forbidden) but are intentionally not rendered any more.
         HeaderComponentMiuix(
             icon = Icons.Rounded.BugReport,
             title = stringResource(id = R.string.hide_environment_risk_title),
@@ -478,7 +477,7 @@ private fun HidingPackCardMiuix(uiState: HideEnvironmentUiState, actions: HideEn
             )
 
             // bundleEntries = visible minus detectors (quick-install card only) and with the
-            // PathMask variants collapsed to the branch matching this kernel (users m03682/m03683).
+            // PathMask variants collapsed to the branch matching this kernel.
             HidingPackState.Ready -> uiState.bundleEntries.forEach { entry ->
                 HidingPackEntryMiuix(uiState, entry, actions)
             }
@@ -573,7 +572,7 @@ private fun RefreshPreference(onRefresh: () -> Unit) {
 }
 
 /**
- * Card header whose leading icon sits on the title line (user m03680: "这里的字体和图标不在同一高度").
+ * Card header whose leading icon sits on the title line.
  *
  * Miuix' own [BasicComponent] centres its `startAction` on the whole title+summary block
  * (`startTop = (rowHeight - startHeight) / 2` in Component.kt), so a two-line header pins the icon

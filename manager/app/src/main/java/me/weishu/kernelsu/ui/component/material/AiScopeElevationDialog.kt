@@ -17,7 +17,7 @@ import me.weishu.kernelsu.data.agent.AiAccessScope
 
 /**
  * Confirmation for widening the file access scope, Material flavour. Mirrors AiScopeElevationDialogMiuix:
- * a deliberate separate step that names the target scope, released by a single tap (m04766).
+ * a deliberate separate step that names the target scope, released by a single tap.
  */
 @Composable
 fun AiScopeElevationDialogMaterial(
