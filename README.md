@@ -110,17 +110,17 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 ## 验证状态
 
-- **AI 控制台**：主页入口、模型与参数配置、访问范围、确认弹窗与计划模式已在 Android 15 真机上走通；仓库不保留设备级截图与哈希留档。
+- **AI 控制台**：主页入口、模型与参数配置、访问范围、确认弹窗、附件与图片理解、计划模式已在 Android 16 真机上走通；其中图片理解用一张内容已知的测试图做了端到端核对，回复与图上文字、形状、配色一致。仓库不保留设备级截图与哈希留档。
 - **构建与身份**：`_tools/build-manager.ps1` 出包与管理器身份核对（包名 / 版本 / 证书）在本分支上执行过。
 - **环境隐藏**：安装链路与 HMA-OSS 配置同步已在真机执行过（含一次重启后复核）；**核心隐藏效果的验收用例尚未执行**，见「已知缺口」。
 - **未验证即不写入**：本文件与 `docs/` 中无法在仓库内核对的内容会标注「待验证」，或从文档中删除。
 
 ## 已知缺口
 
-- 环境隐藏的 **B1–B13 真机验收项尚未执行**（编写时无可用设备）。
+- 环境隐藏的**对抗性验收尚未执行**：9 个检测器 APK 没有实跑过隐藏结果（历史上编号为 B1–B13 的用例在仓库内没有定义）。
 - 9 个检测器 APK **未被实跑**验证过隐藏效果。
 - 「重启」按钮 3 次点击中有 2 次无响应，原因未定位。
-- ksud 的 `clippy` 闸门当前未通过（`derive-new` 等上游遗留告警），收口方式见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 3.5 节。
+- ksud 的 clippy 闸门已通过；对上游遗留的两条 pedantic 告警在 crate 级 `allow` 中注明来源后放行，收口说明见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 3.5 节。
 - `keybox.xml`、`target.txt`、`assets/hiding/data` 按契约不随仓库分发。
 - `userspace/ksud/bin/x86_64/` 只有 `busybox`：x86_64 的 LKM 与 `ksuinit` 未随仓库分发（上游由 CI 生成），按源码重建 x86_64 守护进程会缺少这两项资产。
 
