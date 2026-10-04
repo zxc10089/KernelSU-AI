@@ -1,2 +1,6 @@
+# 上游在该目录存放 CI 注入的构建产物（LKM / ksuinit），因此默认忽略。
+# 本分支没有 CI，补丁后的 aarch64 资产改为随仓库分发，故对这两个文件显式放行。
 **/*.ko
 **/ksuinit
+!aarch64/android15-6.6_kernelsu.ko
+!aarch64/ksuinit

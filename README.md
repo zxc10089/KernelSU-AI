@@ -56,7 +56,7 @@
 
 1. **身份收口**：`manager/gradle.properties` 定义 `KSU_PACKAGE_NAME=me.weishu.kernelsu.hide`、`KSU_VERSION_CODE=32601`、`KSU_VERSION_NAME=v3.3.0+main`；`manager/app/build.gradle.kts` 的版本号优先读 Gradle property，再回退 git 推导。
 2. **Rust 依赖源**：`Kernel-SU/*` 改为 `KernelSU2/*`（`adb_client`、`java-properties`、`ksu_props`、`rustix`），`Cargo.toml` 与 `Cargo.lock` 同步。
-3. **预编译 `libksud.so` 随仓库分发**：`manager/app/src/main/jniLibs/{arm64-v8a,x86_64}/libksud.so`（管理器构建要求 `jniLibs/arm64-v8a/libksud.so` 存在）；上游忽略这两个文件的规则已移除，没有 Rust 工具链也能出包。守护进程只发到 jniLibs 一处——`userspace/ksud/bin/x86_64` 是 x86_64 守护进程的 rust-embed 资产目录（`userspace/ksud/src/assets.rs`），副本放在那里会被下一次 x86_64 构建自己嵌进二进制。
+3. **预编译 `libksud.so` 随仓库分发**：`manager/app/src/main/jniLibs/{arm64-v8a,x86_64}/libksud.so`（管理器构建要求 `jniLibs/arm64-v8a/libksud.so` 存在）；上游忽略这两个文件的规则已移除，没有 Rust 工具链也能出包。守护进程只发到 jniLibs 一处——`userspace/ksud/bin/x86_64` 是 x86_64 守护进程的 rust-embed 资产目录（`userspace/ksud/src/assets.rs`），副本放在那里会被下一次 x86_64 构建自己嵌进二进制。补丁后的内核模块与 `ksuinit` 同样随仓库分发：`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`、`userspace/ksud/bin/aarch64/ksuinit`（上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 产物，本分支为这两个文件加了放行规则）。
 4. **内置隐藏资源包**（约 130 MB，含 9 个第三方检测器 APK），风险见「合规与风险」。
 5. **上游 CI 与 Dependabot 已归档**：`.github/workflows` → `.github/workflows.upstream`、`.github/dependabot.yml` → `.github/dependabot.yml.upstream`（GitHub 只识别原路径，恢复方法与说明见该目录 README）。
 6. **新增内容**：`docs/`（开发文档与手册）、`design/`（设计规格）、`_tools/`（构建、校验与资源包同步脚本）。
@@ -122,6 +122,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 - 「重启」按钮 3 次点击中有 2 次无响应，原因未定位。
 - ksud 的 `clippy` 闸门当前未通过（`derive-new` 等上游遗留告警），收口方式见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 3.5 节。
 - `keybox.xml`、`target.txt`、`assets/hiding/data` 按契约不随仓库分发。
+- `userspace/ksud/bin/x86_64/` 只有 `busybox`：x86_64 的 LKM 与 `ksuinit` 未随仓库分发（上游由 CI 生成），按源码重建 x86_64 守护进程会缺少这两项资产。
 
 逐项说明见 [docs/开发文档.md](docs/开发文档.md)。
 
