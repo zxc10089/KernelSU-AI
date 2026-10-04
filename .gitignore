@@ -10,15 +10,6 @@ __pycache__
 /repack-config.json
 /userspace/ksud/.lkm_image_bootstrap.o
 
-# 仅保留开发文档附录引用的证据报告，其余 _artifacts 大件不入库
-/_artifacts/*
-!/_artifacts/builder/
-/_artifacts/builder/*
-!/_artifacts/builder/evidence/
-!/_artifacts/builder/*.md
-/_artifacts/builder/evidence/*
-!/_artifacts/builder/evidence/*.md
-
 # 秘密/本地文件兜底
 keybox.xml
 target.txt

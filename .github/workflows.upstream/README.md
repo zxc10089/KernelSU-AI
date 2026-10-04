@@ -19,3 +19,9 @@ git commit -m "ci: 恢复上游工作流"
 ## 归档清单
 
 `build-lkm.yml`、`build-manager.yml`、`clang-format.yml`、`clippy.yml`、`ddk-lkm.yml`、`deploy-website.yml`、`ksud-extra.yml`、`ksud.yml`、`ksuinit.yml`、`release.yml`、`rustfmt.yml`、`shellcheck.yml`
+
+## 一并归档：Dependabot
+
+上游的 `.github/dependabot.yml` 已改名为 `.github/dependabot.yml.upstream`。GitHub 只识别 `.github/dependabot.yml`，因此自动依赖升级 PR 不会再生成；把它改回原名即可恢复。
+
+已经开出的 Dependabot PR 与分支不会随改名自动消失，需要在仓库的 Pull requests 页手动关闭（本 fork 的依赖版本经过专门选择，不建议直接合并这些升级）。
