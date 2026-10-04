@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  "Hide Environment" bottom-bar icon - companion artwork for
+  manager/app/src/main/java/me/weishu/kernelsu/ui/icon/HideEnvironmentIcon.kt
+
+  This SVG is the SAME design as the Kotlin ImageVector: identical point list, identical
+  command order, identical 24x24 viewport. Do not edit one without editing the other.
+
+  Kotlin counterpart:
+    ImageVector.Builder(name = "HideEnvironment", defaultWidth = 24.dp, defaultHeight = 24.dp,
+                        viewportWidth = 24f, viewportHeight = 24f)
+    path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd)
+
+  Fill is a single flat black because the Compose Icon() composable re-tints the vector
+  through its `tint` parameter; SolidColor(Color.Black) in Kotlin == fill="#000000" here.
+  fill-rule="evenodd" here == PathFillType.EvenOdd in Kotlin.
+
+  Guide geometry (NOT rendered, documented only):
+    silhouette bounds  x = 3.75 .. 20.25   y = 2.2 .. 21.8   (inside the 2..22 safe area)
+    top edge           y = 2.2, x = 6.1 .. 17.9
+    rounded shoulders  radius 2.35, from (3.75, 4.55) to (6.1, 2.2) and mirrored
+    vertical sides     x = 3.75 and x = 20.25, y = 4.55 .. 13.8
+    straight tapers    (3.75, 13.8) -> tip (12.0, 21.8) -> (20.25, 13.8)
+    bar                rectangle, long axis at 45 degrees along y = x - 0.6,
+                       centreline (6.8, 6.2) -> (16.2, 15.6)
+                       upper edge y = x - 2.7214, lower edge y = x + 1.5214
+                       perpendicular width = 4.2428 / sqrt(2) = 3.0001 dp
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <title>Hide Environment</title>
+
+  <!-- Subpath 1: intact shield silhouette, closed back up the lower-left facet.
+       Subpath 2: the 45-degree negative-space bar, strictly interior to subpath 1. -->
+  <path fill="#000000" fill-rule="evenodd"
+        d="M3.75 4.55 C3.75 3.25 4.8 2.2 6.1 2.2 L17.9 2.2 C19.2 2.2 20.25 3.25 20.25 4.55 L20.25 13.8 L12 21.8 L3.75 13.8 Z M7.8607 5.1393 L17.2607 14.5393 L15.1393 16.6607 L5.7393 7.2607 Z"/>
+</svg>
