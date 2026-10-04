@@ -65,10 +65,17 @@ import me.weishu.kernelsu.ui.navigation3.Navigator
 import me.weishu.kernelsu.ui.navigation3.Route
 import me.weishu.kernelsu.ui.navigation3.rememberNavigator
 import me.weishu.kernelsu.ui.screen.about.AboutScreen
+import me.weishu.kernelsu.ui.screen.aiassistant.AiConsoleScreen
+import me.weishu.kernelsu.ui.screen.aiaudit.AiAuditScreen
+import me.weishu.kernelsu.ui.screen.aiconfig.AiConfigScreen
+import me.weishu.kernelsu.ui.screen.aiconflict.ModuleConflictScreen
+import me.weishu.kernelsu.ui.screen.modulemaker.ModuleMakerScreen
+import me.weishu.kernelsu.ui.screen.aipermission.AiPermissionReviewScreen
 import me.weishu.kernelsu.ui.screen.appprofile.AppProfileScreen
 import me.weishu.kernelsu.ui.screen.colorpalette.ColorPaletteScreen
 import me.weishu.kernelsu.ui.screen.executemoduleaction.ExecuteModuleActionScreen
 import me.weishu.kernelsu.ui.screen.flash.FlashScreen
+import me.weishu.kernelsu.ui.screen.hiding.HideEnvironmentPager
 import me.weishu.kernelsu.ui.screen.home.HomePager
 import me.weishu.kernelsu.ui.screen.install.InstallScreen
 import me.weishu.kernelsu.ui.screen.module.ModulePager
@@ -184,6 +191,12 @@ class MainActivity : ComponentActivity() {
                                 entry<Route.About> { AboutScreen() }
                                 entry<Route.Sulog> { SulogScreen() }
                                 entry<Route.ColorPalette> { ColorPaletteScreen() }
+                                entry<Route.AiConfig> { AiConfigScreen() }
+                                entry<Route.AiConsole> { key -> AiConsoleScreen(key.kickoff) }
+                                entry<Route.AiPermissionReview> { AiPermissionReviewScreen() }
+                                entry<Route.ModuleConflict> { ModuleConflictScreen() }
+                                entry<Route.ModuleMaker> { ModuleMakerScreen() }
+                                entry<Route.AiAudit> { AiAuditScreen() }
                                 entry<Route.AppProfileTemplate> { AppProfileTemplateScreen() }
                                 entry<Route.TemplateEditor> { key -> TemplateEditorScreen(key.template, key.readOnly) }
                                 entry<Route.AppProfile> { key -> AppProfileScreen(key.uid) }
@@ -195,6 +208,7 @@ class MainActivity : ComponentActivity() {
                                 entry<Route.Home> { mainScreenEntry() }
                                 entry<Route.SuperUser> { mainScreenEntry() }
                                 entry<Route.Module> { mainScreenEntry() }
+                                entry<Route.HideEnvironment> { mainScreenEntry() }
                                 entry<Route.Settings> { mainScreenEntry() }
                             }
                         )
@@ -234,7 +248,8 @@ fun MainScreen(
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { MainPagerConfig.PAGE_COUNT })
     val mainPagerState = rememberMainPagerState(pagerState)
     val isManager = Natives.isManager
-    val isFullFeatured = isManager && !Natives.requireNewKernel() && rootAvailable()
+    // root-only unlock: a self-built APK is never crowned manager by the kernel
+    val isFullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
     var userScrollEnabled by remember(isFullFeatured) { mutableStateOf(isFullFeatured) }
 
     val enableNavigationBadge = LocalEnableNavigationBadge.current
@@ -316,8 +331,9 @@ fun MainScreen(
                     when (page) {
                         0 -> if (isCurrentPage || contentReady) HomePager(navController, bottomInnerPadding, isCurrentPage)
                         1 -> if (isCurrentPage || contentReady) SuperUserPager(navController, bottomInnerPadding, isCurrentPage)
-                        2 -> if (isCurrentPage || contentReady) ModulePager(bottomInnerPadding, isCurrentPage)
-                        3 -> if (isCurrentPage || contentReady) SettingPager(navController, bottomInnerPadding)
+                        2 -> if (isCurrentPage || contentReady) HideEnvironmentPager(navController, bottomInnerPadding, isCurrentPage)
+                        3 -> if (isCurrentPage || contentReady) ModulePager(bottomInnerPadding, isCurrentPage)
+                        4 -> if (isCurrentPage || contentReady) SettingPager(navController, bottomInnerPadding)
                     }
                 }
             }

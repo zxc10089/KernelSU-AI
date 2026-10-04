@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -46,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import me.weishu.kernelsu.KernelVersion
 import me.weishu.kernelsu.Natives
 import me.weishu.kernelsu.R
+import me.weishu.kernelsu.ui.icon.AiAssistantIcon
 import me.weishu.kernelsu.ui.component.WarningLevel
 import me.weishu.kernelsu.ui.component.dialog.rememberConfirmDialog
 import me.weishu.kernelsu.ui.component.miuix.WarningCard
@@ -106,15 +106,15 @@ fun HomePagerMiuix(
                     .scrollEndHaptic()
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = HomeDimens.PageHorizontal),
                 contentPadding = innerPadding,
                 overscrollEffect = null,
             ) {
                 item {
                     Column(
-                        modifier = Modifier.padding(top = 12.dp),
+                        modifier = Modifier.padding(top = HomeDimens.PageTop),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(HomeDimens.CardSpacing),
                     ) {
                         if (state.checkUpdateEnabled) {
                             UpdateCard(state = state, actions = actions)
@@ -172,6 +172,7 @@ fun HomePagerMiuix(
                             actions = actions,
                         )
                         InfoCard(systemInfo = state.systemInfo)
+                        AiAssistantCard(onClick = actions.onOpenAiConfig)
                         DonateCard(onOpenUrl = actions.onOpenUrl)
                         LearnMoreCard(onOpenUrl = actions.onOpenUrl)
                         Spacer(Modifier.height(bottomInnerPadding))
@@ -427,6 +428,24 @@ private fun LearnMoreCard(
 }
 
 @Composable
+private fun AiAssistantCard(onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        BasicComponent(
+            title = stringResource(R.string.home_ai_assistant_title),
+            summary = stringResource(R.string.home_ai_assistant_summary),
+            endActions = {
+                Icon(
+                    imageVector = AiAssistantIcon,
+                    tint = colorScheme.onSurface,
+                    contentDescription = null
+                )
+            },
+            onClick = onClick
+        )
+    }
+}
+
+@Composable
 private fun DonateCard(onOpenUrl: (String) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
         BasicComponent(
@@ -439,8 +458,7 @@ private fun DonateCard(onOpenUrl: (String) -> Unit) {
                     contentDescription = null
                 )
             },
-            onClick = { onOpenUrl("https://patreon.com/weishu") },
-            insideMargin = PaddingValues(18.dp)
+            onClick = { onOpenUrl("https://patreon.com/weishu") }
         )
     }
 }
@@ -451,7 +469,7 @@ private fun InfoCard(systemInfo: SystemInfo) {
     fun InfoText(
         title: String,
         content: String,
-        bottomPadding: Dp = 24.dp
+        bottomPadding: Dp = HomeDimens.InfoRowBottom
     ) {
         Text(
             text = title,
@@ -471,7 +489,7 @@ private fun InfoCard(systemInfo: SystemInfo) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(HomeDimens.CardInner)
         ) {
             InfoText(title = stringResource(R.string.home_manager_version), content = systemInfo.managerVersion)
             InfoText(title = stringResource(R.string.home_kernel), content = systemInfo.kernelVersion)

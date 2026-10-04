@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.filled.Check
@@ -35,6 +36,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.MenuDefaults
+import androidx.compose.material3.SmallExtendedFloatingActionButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -61,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.weishu.kernelsu.R
+import me.weishu.kernelsu.ui.icon.AiAssistantIcon
 import me.weishu.kernelsu.data.model.AppInfo
 import me.weishu.kernelsu.ui.component.AppIconImage
 import me.weishu.kernelsu.ui.component.ScrollToTopOnChange
@@ -116,6 +119,13 @@ fun SuperUserPagerMaterial(
                     }
                 },
                 actions = {
+                    IconButton(onClick = actions.onOpenPermissionReview) {
+                        Icon(
+                            imageVector = Icons.Filled.Security,
+                            contentDescription = stringResource(R.string.ai_permission_title)
+                        )
+                    }
+
                     var showSortMenu by remember { mutableStateOf(false) }
 
                     IconButton(onClick = { showSortMenu = true }) {
@@ -305,6 +315,15 @@ fun SuperUserPagerMaterial(
                         }
                     }
                 }
+            )
+        },
+        floatingActionButton = {
+            SmallExtendedFloatingActionButton(
+                modifier = Modifier.padding(bottom = bottomInnerPadding, end = 16.dp),
+                expanded = true,
+                onClick = actions.onOpenAiConsole,
+                icon = { Icon(imageVector = AiAssistantIcon, contentDescription = null) },
+                text = { Text(text = stringResource(R.string.ai_console_title)) },
             )
         },
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)

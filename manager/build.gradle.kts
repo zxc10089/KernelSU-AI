@@ -26,10 +26,15 @@ fun getGitDescribe(): String {
 }
 
 fun getVersionCode(): Int {
+    // A downloaded source snapshot has no upstream git history, so the version
+    // identity can be pinned from gradle.properties instead of the local commit
+    // count; the git-derived value stays the default for a real checkout.
+    providers.gradleProperty("KSU_VERSION_CODE").orNull?.trim()?.toIntOrNull()?.let { return it }
     val commitCount = getGitCommitCount()
     return 30000 + commitCount
 }
 
 fun getVersionName(): String {
+    providers.gradleProperty("KSU_VERSION_NAME").orNull?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     return getGitDescribe()
 }

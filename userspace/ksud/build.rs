@@ -227,7 +227,20 @@ fn main() {
             (0, "0.0.0".to_string())
         }
     };
+    // KSU_PACKAGE_NAME is compiled into the daemon (defs.rs DEFAULT_PACKAGE_NAME) and decides
+    // which manager the daemon force-stops / `am start`s (late_load.rs) and where the boot
+    // backup is written (boot_patch.rs). An unset value silently bakes in the UPSTREAM manager,
+    // which makes a fork install the official manager; make that visible instead of silent.
+    // Cargo caches this script's stdout and only re-runs it when a declared input changes. Without
+    // this directive, setting KSU_PACKAGE_NAME after a first (unset) run would NOT re-run the
+    // script, and the cached upstream fallback below would be replayed into the daemon.
+    println!("cargo:rerun-if-env-changed=KSU_PACKAGE_NAME");
     if env::var("KSU_PACKAGE_NAME").is_err() {
+        println!(
+            "cargo:warning=KSU_PACKAGE_NAME is not set; defaulting to the UPSTREAM manager \
+             'me.weishu.kernelsu'. Set KSU_PACKAGE_NAME to your fork's applicationId (use \
+             _tools/build-ksud.ps1) or the daemon will target the official manager."
+        );
         println!("cargo:rustc-env=KSU_PACKAGE_NAME=me.weishu.kernelsu");
     }
     println!("cargo:rustc-env=VERSION_CODE={code}");

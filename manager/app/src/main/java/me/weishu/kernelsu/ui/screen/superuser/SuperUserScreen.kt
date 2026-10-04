@@ -13,6 +13,7 @@ import me.weishu.kernelsu.ui.LocalUiMode
 import me.weishu.kernelsu.ui.UiMode
 import me.weishu.kernelsu.ui.navigation3.Navigator
 import me.weishu.kernelsu.ui.navigation3.Route
+import me.weishu.kernelsu.ui.screen.aiassistant.AiConsoleKickoff
 import me.weishu.kernelsu.ui.viewmodel.SuperUserViewModel
 
 @Composable
@@ -52,6 +53,8 @@ fun SuperUserPager(
     val actions = SuperUserActions(
         onRefresh = { viewModel.loadAppList(force = true) },
         onOpenSulog = { navigator.push(Route.Sulog) },
+        onOpenAiConsole = { navigator.push(Route.AiConsole(kickoff = AiConsoleKickoff.ROOT_REVIEW)) },
+        onOpenPermissionReview = { navigator.push(Route.AiPermissionReview) },
         onSearchTextChange = onSearchTextChange,
         onSearchStatusChange = viewModel::updateSearchStatus,
         onClearSearch = { onSearchTextChange("") },

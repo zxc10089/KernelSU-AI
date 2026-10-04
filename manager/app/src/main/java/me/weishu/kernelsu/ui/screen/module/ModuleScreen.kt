@@ -121,6 +121,8 @@ fun ModulePager(
             viewModel.dismissConfirmRequest()
         },
         onOpenRepo = { navigator.push(Route.ModuleRepo) },
+        onOpenConflictCheck = { navigator.push(Route.ModuleConflict) },
+        onOpenModuleMaker = { navigator.push(Route.ModuleMaker) },
         onToggleSortActionFirst = {
             viewModel.toggleSortActionFirst()
         },

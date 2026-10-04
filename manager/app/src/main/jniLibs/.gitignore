@@ -1,1 +1,2 @@
-libksud.so
+# fork 交付：预编译 libksud.so 随仓库分发，供无 Rust 工具链者直接出包（见 README「与上游差异」）
+# 上游原规则为忽略 libksud.so，本 fork 移除该忽略。

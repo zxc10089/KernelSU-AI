@@ -34,6 +34,10 @@ sealed interface Route : NavKey, Parcelable {
 
     @Parcelize
     @Serializable
+    data object HideEnvironment : Route
+
+    @Parcelize
+    @Serializable
     data object Settings : Route
 
     @Parcelize
@@ -82,4 +86,28 @@ sealed interface Route : NavKey, Parcelable {
     @Parcelize
     @Serializable
     data class ExecuteModuleAction(val moduleId: String, val fromShortcut: Boolean = false) : Route
+
+    @Parcelize
+    @Serializable
+    data object AiConfig : Route
+
+    @Parcelize
+    @Serializable
+    data class AiConsole(val kickoff: String? = null) : Route
+
+    @Parcelize
+    @Serializable
+    data object AiPermissionReview : Route
+
+    @Parcelize
+    @Serializable
+    data object ModuleConflict : Route
+
+    @Parcelize
+    @Serializable
+    data object AiAudit : Route
+
+    @Parcelize
+    @Serializable
+    data object ModuleMaker : Route
 }

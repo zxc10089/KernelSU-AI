@@ -220,6 +220,18 @@ fun flashModule(
     }
 }
 
+/** Installs an already built module zip, streaming the installer output to the caller. */
+fun installModuleZip(
+    zipPath: String,
+    onStdout: (String) -> Unit,
+    onStderr: (String) -> Unit
+): FlashResult {
+    val cmd = "module install $zipPath"
+    val result = flashWithIO("${getKsuDaemonPath()} $cmd", onStdout, onStderr)
+    Log.i(TAG, "install module $zipPath result: $result")
+    return FlashResult(result)
+}
+
 fun runModuleAction(
     moduleId: String, onStdout: (String) -> Unit, onStderr: (String) -> Unit
 ): Boolean {

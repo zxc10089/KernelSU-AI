@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 import me.weishu.kernelsu.Natives
 import me.weishu.kernelsu.R
 import me.weishu.kernelsu.ui.LocalMainPagerState
+import me.weishu.kernelsu.ui.icon.HideEnvironmentIcon
 import me.weishu.kernelsu.ui.util.rootAvailable
 
 @Composable
@@ -46,7 +47,8 @@ fun NavigationRailMaterial(
     modifier: Modifier = Modifier,
 ) {
     val isManager = Natives.isManager
-    val fullFeatured = isManager && !Natives.requireNewKernel() && rootAvailable()
+    // root-only unlock: a self-built APK is never crowned manager by the kernel
+    val fullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
     val mainPagerState = LocalMainPagerState.current
 
     if (!fullFeatured) return
@@ -54,6 +56,7 @@ fun NavigationRailMaterial(
     val items = listOf(
         Triple(R.string.home, Icons.Filled.Home, Icons.Outlined.Home),
         Triple(R.string.superuser, Icons.Filled.Shield, Icons.Outlined.Shield),
+        Triple(R.string.hide_environment_tab, HideEnvironmentIcon, HideEnvironmentIcon),
         Triple(R.string.module, Icons.Filled.Extension, Icons.Outlined.Extension),
         Triple(R.string.settings, Icons.Filled.Settings, Icons.Outlined.Settings)
     )

@@ -152,6 +152,8 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.ConvertFile
+import top.yukonga.miuix.kmp.icon.extended.HorizontalSplit
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.MoreCircle
@@ -309,6 +311,24 @@ fun ModulePagerMiuix(
                         color = barColor,
                         title = stringResource(R.string.module),
                         actions = {
+                            IconButton(
+                                onClick = actions.onOpenModuleMaker,
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.ConvertFile,
+                                    tint = colorScheme.onSurface,
+                                    contentDescription = stringResource(R.string.module_maker_open)
+                                )
+                            }
+                            IconButton(
+                                onClick = actions.onOpenConflictCheck,
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.HorizontalSplit,
+                                    tint = colorScheme.onSurface,
+                                    contentDescription = stringResource(R.string.ai_conflict_title)
+                                )
+                            }
                             Box {
                                 val showTopPopup = remember { mutableStateOf(false) }
                                 IconButton(

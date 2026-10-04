@@ -27,6 +27,7 @@ import me.weishu.kernelsu.R
 import me.weishu.kernelsu.ui.LocalMainPagerState
 import me.weishu.kernelsu.ui.component.FloatingBottomBar
 import me.weishu.kernelsu.ui.component.FloatingBottomBarItem
+import me.weishu.kernelsu.ui.icon.HideEnvironmentIcon
 import me.weishu.kernelsu.ui.theme.LocalEnableFloatingBottomBar
 import me.weishu.kernelsu.ui.theme.LocalEnableFloatingBottomBarBlur
 import me.weishu.kernelsu.ui.util.BlurredBar
@@ -50,7 +51,8 @@ fun BottomBarMiuix(
     modifier: Modifier,
 ) {
     val isManager = Natives.isManager
-    val fullFeatured = isManager && !Natives.requireNewKernel() && rootAvailable()
+    // root-only unlock: a self-built APK is never crowned manager by the kernel
+    val fullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
     if (!fullFeatured) return
 
     val mainState = LocalMainPagerState.current
@@ -104,7 +106,11 @@ fun BottomBarMiuix(
                     onClick = {
                         mainState.animateToPage(index)
                     },
-                    modifier = Modifier.defaultMinSize(minWidth = 76.dp)
+                    // FloatingBottomBar gives every item an exact width via weight(1f), so this floor
+                    // must stay below the per-tab width: 4 tabs -> 74.0dp, 5 tabs (with the hide
+                    // environment page) -> 59.2dp on a 360dp wide screen.
+                    // See design/environment-hide-spec.md section 3.4.
+                    modifier = Modifier.defaultMinSize(minWidth = 56.dp)
                 ) {
                     // Icon and label take LocalContentColor so the FloatingBottomBar backdrop copy
                     // can recolor them to the accent tone inside the indicator pill.
@@ -140,6 +146,7 @@ enum class BottomBarDestination(
 ) {
     Home(R.string.home, Icons.Rounded.Cottage),
     SuperUser(R.string.superuser, Icons.Rounded.Security),
+    HideEnvironment(R.string.hide_environment_tab, HideEnvironmentIcon),
     Module(R.string.module, Icons.Rounded.Extension),
     Setting(R.string.settings, Icons.Rounded.Settings)
 }

@@ -70,6 +70,8 @@ data class ModuleActions(
     val onDismissConfirmRequest: () -> Unit,
     val onConfirmUpdate: (ModuleConfirmRequest.Update) -> Unit,
     val onOpenRepo: () -> Unit,
+    val onOpenConflictCheck: () -> Unit,
+    val onOpenModuleMaker: () -> Unit,
     val onToggleSortActionFirst: () -> Unit,
     val onToggleSortEnabledFirst: () -> Unit,
     val onOpenWebUi: (Module) -> Unit,

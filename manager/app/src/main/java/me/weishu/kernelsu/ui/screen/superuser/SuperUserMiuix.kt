@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.weishu.kernelsu.R
+import me.weishu.kernelsu.ui.icon.AiAssistantIcon
 import me.weishu.kernelsu.data.model.AppInfo
 import me.weishu.kernelsu.ui.component.AppIconImage
 import me.weishu.kernelsu.ui.component.ListPopupDefaults
@@ -79,6 +80,7 @@ import me.weishu.kernelsu.ui.util.ownerNameForUid
 import me.weishu.kernelsu.ui.util.rememberBlurBackdrop
 import me.weishu.kernelsu.ui.viewmodel.AppSortType
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -94,6 +96,7 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.HorizontalSplit
 import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.icon.extended.Notes
@@ -141,6 +144,15 @@ fun SuperUserPagerMiuix(
                             }
                         },
                         actions = {
+                            IconButton(
+                                onClick = actions.onOpenPermissionReview,
+                            ) {
+                                Icon(
+                                    imageVector = MiuixIcons.HorizontalSplit,
+                                    tint = colorScheme.onSurface,
+                                    contentDescription = stringResource(R.string.ai_permission_title)
+                                )
+                            }
                             Box {
                                 val showSortPopup = remember { mutableStateOf(false) }
                                 OverlayListPopup(
@@ -394,6 +406,21 @@ fun SuperUserPagerMiuix(
                     }
                 }
             }
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                modifier = Modifier
+                    .padding(bottom = bottomInnerPadding + 20.dp, end = 20.dp),
+                onClick = actions.onOpenAiConsole,
+                content = {
+                    Icon(
+                        imageVector = AiAssistantIcon,
+                        contentDescription = stringResource(R.string.ai_console_title),
+                        modifier = Modifier.size(28.dp),
+                        tint = colorScheme.onPrimary,
+                    )
+                },
+            )
         },
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal)
     ) { innerPadding ->

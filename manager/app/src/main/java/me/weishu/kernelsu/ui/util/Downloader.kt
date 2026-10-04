@@ -36,9 +36,26 @@ suspend fun download(
         }
 }
 
+/**
+ * Release feed this manager checks for ITS OWN updates, as "owner/repo".
+ *
+ * Do NOT point this at the official KernelSU repository. This fork installs under a different
+ * applicationId (KSU_PACKAGE_NAME in manager/gradle.properties) but is signed with the SAME
+ * certificate, and the kernel crowns whichever package presents that certificate -- so the
+ * official APK advertised here is also a manager the kernel would hand control to. Offering it
+ * quietly invites users to replace this manager with the one this fork exists to avoid.
+ *
+ * Blank means "this fork publishes no releases", which makes the check a no-op. Set it if you
+ * publish your own builds.
+ */
+private const val UPDATE_REPO = ""
+
 fun checkNewVersion(): LatestVersionInfo {
+    // Never fall through to a hardcoded upstream repository: a fork with no release channel of its
+    // own has nothing to offer, and anything else would be advertising a rival manager.
+    if (UPDATE_REPO.isBlank()) return LatestVersionInfo()
     if (!isNetworkAvailable(ksuApp)) return LatestVersionInfo()
-    val url = "https://api.github.com/repos/tiann/KernelSU/releases/latest"
+    val url = "https://api.github.com/repos/$UPDATE_REPO/releases/latest"
     // default null value if failed
     val defaultValue = LatestVersionInfo()
     runCatching {
@@ -61,7 +78,6 @@ fun checkNewVersion(): LatestVersionInfo {
 
                     val regex = Regex("v(.+?)_(\\d+)-")
                     val matchResult = regex.find(name) ?: continue
-                    matchResult.groupValues[1]
                     val versionCode = matchResult.groupValues[2].toInt()
                     val downloadUrl = asset.getString("browser_download_url")
 

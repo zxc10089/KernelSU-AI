@@ -55,6 +55,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.Rule
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Cloud
@@ -293,6 +295,20 @@ fun ModulePagerMaterial(
                 },
                 actions = {
                     RebootListPopup()
+
+                    IconButton(onClick = actions.onOpenModuleMaker) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = stringResource(R.string.module_maker_open)
+                        )
+                    }
+
+                    IconButton(onClick = actions.onOpenConflictCheck) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Rule,
+                            contentDescription = stringResource(R.string.ai_conflict_title)
+                        )
+                    }
 
                     var showDropdown by remember { mutableStateOf(false) }
                     IconButton(

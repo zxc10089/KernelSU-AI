@@ -18,7 +18,8 @@ fun NavigationRailMiuix(
     modifier: Modifier = Modifier,
 ) {
     val isManager = Natives.isManager
-    val fullFeatured = isManager && !Natives.requireNewKernel() && rootAvailable()
+    // root-only unlock: a self-built APK is never crowned manager by the kernel
+    val fullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
     if (!fullFeatured) return
 
     val mainState = LocalMainPagerState.current
