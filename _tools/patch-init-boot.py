@@ -42,6 +42,9 @@ What it does
   2. decompresses the LZ4-legacy ramdisk into a cpio archive
   3. locates the kernelsu.ko cpio member
   4. applies the requested byte patches to that ko
+     * --replace-ko : swap the payload for another build; a DIFFERENT size is allowed
+       and makes step 5 re-serialise the whole cpio (a newc member's size shifts every
+       later entry, so an in-place byte patch would corrupt the archive)
      * --manager-appid : ELF .symtab lookup of ksu_manager_appid, 4 bytes LE
      * --signer-sha256 / --signer-size : the two compile-time constants used by
        check_v2_signature() (64 hex chars + the cmp imm on aarch64)
@@ -174,6 +177,35 @@ def cpio_members(data: bytes):
                             hdr_off=pos, hdr_len=hdr))
         pos = pos + hdr + ((filesize + 3) & ~3)
     return members
+
+
+def rebuild_cpio(cpio: bytes, members, ko_mem, new_ko: bytes) -> bytes:
+    """Rebuild a newc cpio with one member payload replaced, size changes allowed.
+
+    newc entries are a flat sequence -- header (110 B) + name + pad4 + data + pad4 --
+    so replacing a payload with one of a different size shifts every later entry and
+    the archive must be re-serialised instead of byte-patched in place. Header fields
+    are copied verbatim except filesize (offset 54, 8 hex chars). The archive tail
+    (the TRAILER!!! entry and any trailing zero padding) is preserved.
+    """
+    ko_len = len(new_ko)
+    out = bytearray()
+    for m in members:
+        if m["hdr_off"] == ko_mem["hdr_off"]:
+            hdr = bytearray(cpio[m["hdr_off"]:m["hdr_off"] + m["hdr_len"]])
+            hdr[54:62] = b"%08X" % ko_len
+            out += hdr
+            out += new_ko
+            out += b"\0" * (((ko_len + 3) & ~3) - ko_len)
+        else:
+            out += cpio[m["hdr_off"]:m["data_off"]]
+            out += cpio[m["data_off"]:m["data_off"] + m["size"]]
+            pad = ((m["size"] + 3) & ~3) - m["size"]
+            if pad:
+                out += cpio[m["data_off"] + m["size"]:m["data_off"] + m["size"] + pad]
+    last = members[-1]
+    out += cpio[last["data_off"] + last["size"]:]
+    return bytes(out)
 
 
 def find_symbol(elf: bytes, want: str):
@@ -338,13 +370,13 @@ def main():
         print("            dumped -> %s" % args.dump_ko)
 
     original_ko = bytes(ko)
+    size_changed = False
     if args.replace_ko:
         new_ko = open(args.replace_ko, "rb").read()
-        if len(new_ko) != len(ko):
-            print("FATAL: replacement ko size %d != %d" % (len(new_ko), len(ko)))
-            return 2
+        size_changed = len(new_ko) != len(ko)
         ko = bytearray(new_ko)
-        print("replace-ko  : %s (%d bytes)" % (args.replace_ko, len(new_ko)))
+        print("replace-ko  : %s (%d bytes%s)" % (args.replace_ko, len(new_ko),
+              ", was %d -> cpio rebuild" % len(original_ko) if size_changed else ""))
 
     if args.manager_appid is not None and not patch_manager_appid(ko, args.manager_appid):
         return 2
@@ -352,12 +384,17 @@ def main():
     if args.signer_sha256 or args.signer_size is not None:
         if not patch_signer(ko, args.signer_sha256, args.signer_size):
             return 2
-    new_cpio = bytearray(cpio)
-    new_cpio[ko_mem["data_off"]:ko_mem["data_off"] + ko_mem["size"]] = ko
-    new_cpio = bytes(new_cpio)
-    diff = [k for k in range(len(cpio)) if new_cpio[k] != cpio[k]]
-    print("cpio diff   : %d byte(s) %s" % (len(diff), [hex(d) for d in diff[:16]]))
-    if not args.dry_run and not diff:
+    if size_changed:
+        new_cpio = rebuild_cpio(cpio, members, ko_mem, bytes(ko))
+    else:
+        new_cpio = bytearray(cpio)
+        new_cpio[ko_mem["data_off"]:ko_mem["data_off"] + ko_mem["size"]] = ko
+        new_cpio = bytes(new_cpio)
+    n = min(len(cpio), len(new_cpio))
+    diff = [k for k in range(n) if new_cpio[k] != cpio[k]]
+    print("cpio diff   : %d -> %d bytes, %d byte(s) differ %s" % (
+        len(cpio), len(new_cpio), len(diff), [hex(d) for d in diff[:16]]))
+    if not args.dry_run and not diff and len(cpio) == len(new_cpio):
         print("WARN: nothing to patch; not writing output")
 
     new_rd = encode_ramdisk(new_cpio)
@@ -378,14 +415,26 @@ def main():
     chk = parse_boot(new_img)
     _, chk_rd = ramdisk_region(new_img, chk)
     chk_cpio = decode_ramdisk(chk_rd)
-    vdiff = [k for k in range(len(chk_cpio)) if chk_cpio[k] != cpio[k]]
-    chk_ko = chk_cpio[ko_mem["data_off"]:ko_mem["data_off"] + ko_mem["size"]]
-    print("verify      : ramdisk_size=%d cpio=%d total diff=%d" % (chk["ramdisk_size"], len(chk_cpio), len(vdiff)))
-    print("verify      : ko sha256=%s (unchanged ko: %s)" % (
-        hashlib.sha256(chk_ko).hexdigest(), chk_ko == original_ko))
+    # The ko payload may legitimately differ in size from the base one, so every comparison
+    # here is anchored on the archive we INTENDED to write, never on the base archive.
+    n2 = min(len(chk_cpio), len(new_cpio))
+    vdiff = [k for k in range(n2) if chk_cpio[k] != new_cpio[k]]
+    chk_members = cpio_members(chk_cpio)
+    same_names = [m["name"] for m in chk_members] == [m["name"] for m in members]
+    chk_ko_mem = [m for m in chk_members if m["name"] == ko_mem["name"]]
+    chk_ko = b""
+    if chk_ko_mem:
+        o = chk_ko_mem[0]["data_off"]
+        chk_ko = chk_cpio[o:o + chk_ko_mem[0]["size"]]
+    print("verify      : ramdisk_size=%d cpio=%d (intended %d) roundtrip diff=%d" % (
+        chk["ramdisk_size"], len(chk_cpio), len(new_cpio), len(vdiff)))
+    print("verify      : ko sha256=%s (matches the written ko: %s)" % (
+        hashlib.sha256(chk_ko).hexdigest(), chk_ko == bytes(ko)))
+    print("verify      : cpio member order/names preserved: %s" % same_names)
     hdr_diff = [k for k in range(meta["page"]) if new_img[k] != img[k]]
     print("verify      : header byte diffs %s" % [hex(k) for k in hdr_diff])
-    ok = (len(vdiff) == len(diff) and len(chk_cpio) == len(cpio)
+    ok = (not vdiff and len(chk_cpio) == len(new_cpio) and same_names
+          and chk_ko == bytes(ko)
           and hdr_diff and set(hdr_diff) <= {12, 13, 14, 15})
     print("verify      : %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

@@ -144,9 +144,24 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 - 全矩阵：Actions → `Build LKM for KernelSU` → Run workflow（`build-lkm.yml` → `ddk-lkm.yml`，容器 `ghcr.io/ylarod/ddk-min:<kmi>-<ddk_release>`）；
 - 只构建本机需要的 KMI：`.github/workflows/build-lkm-fork.yml`（push `kernel/**` 自动触发，产物名 `aarch64-android15-6.6-lkm`，并把 ko 提交到 `ci/lkm` 分支便于取回）。
 
-**路径 B（回退，本机无 DDK 容器时的交付方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的——靠「私钥证书唯一」达到同等效果。当前内置资产即这条路径：
+**路径 A 已落地（2026-10-05）**：`.github/workflows/build-lkm-fork.yml` 触发的 DDK CI（run `37305609190`，`Build kernelsu.ko for android15-6.6` 全绿）产出源码构建的 ko，经 `_tools/adopt-lkm-asset.ps1 -Ko <built.ko> -Verify` 收编为内置资产：
 
-- 校验闸门同时是两条路径的判据：路径 A 的产物含 `me.weishu.kernelsu.hide` 字符串（只有真正定义 `KSU_MANAGER_PACKAGE` 才会出现），路径 B 的产物没有；`_tools/verify-identity.ps1` 第 4 节核对的是两条路径共有的那对特征（证书哈希 + DER 长度），包名闸门待路径 A 产物落地后加入。
+- `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`：**315,280 字节**，sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`，含 `me.weishu.kernelsu.hide` 字符串（= `KSU_MANAGER_PACKAGE` 已编译进内核模块，包名校验生效）；同一 CI 产物在 `ci/lkm` 分支留档。
+- 被替换的路径 B 产物归档到 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`（sha256 `d537e0d7…c9178`）。
+- vermagic 四种 ko 副本完全一致（`6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64`），所以源码构建与设备上已在跑的回退产物一样可加载。
+
+**路径 B（回退，本机无 DDK 容器时的应急方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的——只靠「私钥证书唯一」达到同等效果：
+
+- 校验闸门同时是两条路径的判据：路径 A 的产物含 `me.weishu.kernelsu.hide` 字符串（只有真正定义 `KSU_MANAGER_PACKAGE` 才会出现），路径 B 的产物没有；`_tools/verify-identity.ps1 -RequireSourceBuild` 把包名这一项作为闸门（缺字符串即 FAIL），不带该开关时只报 `provenance=path A/path B` 的 WARN。
+
+**镜像产物（源码 ko + 冠位预置）**：`_tmp/init_boot_a_sourceko_appid10627.img`（8,388,608 字节，sha256 `4fbe9ef40eb0c38a52954527010f9085a07e7236cce26b6c3114e0a5d230f844`），构建方式：
+
+```powershell
+python _tools/patch-init-boot.py --base <当前已刷镜像> --out <out.img> `
+    --replace-ko userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko --manager-appid <uid%100000>
+```
+
+ko 大小变了（315176 -> 315280），工具会重排 newc 归档而不是原地覆盖。独立复核（不共用 producer 代码）：`_tools/verify-init-boot.py <img> --expect-appid 10627 --require-source-build` -> 7 项全 PASS；对旧的路径 B 镜像同参数 2 项 FAIL（产地 + 冠位），证明判据有效。
 
 ## 5. 注意事项（踩过的坑）
 
@@ -155,8 +170,8 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 - `CONFIG_KSU_DEBUG` 的 sysfs 通道（`/sys/module/kernelsu/parameters/…`）在本分支不可用：
   `kernel/core/init.c:183-186` 在非 debug 下 `kobject_del()` 掉了 `/sys/module/kernelsu`。
   也没有任何 ioctl 可以设置 appid（只有 `KSU_IOCTL_GET_MANAGER_APPID`，且限 manager/root）。
-- 冠位判定不看包名，只看证书（本分支）；因此**任何**用同一 debug key 签名的应用都会竞争。
-  交付/测试时不要把这种 APK 与管理器一起装在同一设备上。
+- 路径 B 产物的冠位判定不看包名、只看证书；因此**任何**用同一 key 签名的应用都会竞争（2026-10-05 的 `moe.nb4a.debug` 事件）。
+  路径 A 产物额外校验包名，必须同时是 `me.weishu.kernelsu.hide`；交付/测试时不要把同 key 的 APK 与管理器装在同一设备上。
 - `ksud boot-patch` 注入的是 ksud 二进制内嵌的 ko；若用未预置的 ksud 去打补丁，会覆盖掉本次修复。
   用本工具或预置好的镜像。
 - 设备内 `/data/adb/ksu/bin/ksud` 缺失时，内核 rc 里的 post-fs-data/services/boot-completed 钩子不会执行；

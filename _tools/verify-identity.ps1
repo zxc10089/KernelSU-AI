@@ -28,7 +28,11 @@ param(
     [string]$Root = '',
     # Run the classifier's own positive/negative controls and exit. Proves the checks above can BOTH
     # fail and pass, so a PASS can never be mistaken for a check that is simply unable to match.
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    # Make the LKM asset's PROVENANCE a hard gate: a module built from source compiles the manager
+    # package name in (-DKSU_MANAGER_PACKAGE), the byte-patch fallback cannot. Without this switch
+    # a byte-patched asset is only a warning, because it is still cert-identical to a source build.
+    [switch]$RequireSourceBuild
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Root) { $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
@@ -244,6 +248,18 @@ if ($assets.Count -eq 0) {
         Check "LKM asset carries the project cert SHA-256" ($nHash -ge 1) "$rel hash-literal x$nHash (want >= 1)"
         if ($wantSize -gt 0) {
             Check "LKM asset expects the project cert DER length" $immOk "$rel cmp-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
+        }
+        # PROVENANCE: -DKSU_MANAGER_PACKAGE compiles the manager package name into is_manager_apk().
+        # A byte-patched asset rewrites the cert hash and the DER-length immediate only, so the
+        # package gate is absent and the asset is cert-identical to a source build -- report that
+        # difference instead of letting it hide behind an identical hash check.
+        $nPkg = ([regex]::Matches($text, [regex]::Escape($ExpectedPackage))).Count
+        $prov = if ($nPkg -ge 1) { 'path A (from source: KSU_MANAGER_PACKAGE compiled in)' } else { 'path B (byte-patched: cert only)' }
+        Write-Host ("       {0} provenance={1} pkg-string x{2}" -f $rel, $prov, $nPkg)
+        if ($RequireSourceBuild) {
+            Check "LKM asset is a source build (manager package name compiled in)" ($nPkg -ge 1) "$rel pkg-string x$nPkg (want >= 1)"
+        } elseif ($nPkg -eq 0) {
+            Warn "LKM asset is a byte-patched fallback (no compiled package name)" "$rel -- adopt a DDK CI build: _tools/adopt-lkm-asset.ps1 -Ko <built.ko>"
         }
         Write-Host ("       {0} size={1} sha256={2}" -f $rel, $bytes.Length, $sha)
     }

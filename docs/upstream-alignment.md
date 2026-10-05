@@ -79,7 +79,8 @@ endif
 
 这与上游给自己写死官方身份（`0x033b` / `c371061b…`）的做法一致，只是值换成本项目的：上游 CI 因此无需任何改动即可构建本分支的 ko。用 `make KSU_EXPECTED_SIZE=… KSU_EXPECTED_HASH=… KSU_MANAGER_PACKAGE=…` 仍可覆盖。
 
-## 7. 尚未完成的收口
+## 7. 收口结果（2026-10-05 已完成）
 
-- 仓库里当前分发的 `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`（sha256 `d537e0d76969a7dab712926b292dc66e23f6ba915067e615486d829a738c9178`）仍是「上游 v3.3.0 产物 + 两处常量等长替换」的回退交付：证书哈希与 DER 长度正确，但 `KSU_MANAGER_PACKAGE` 的包名校验没编进二进制。
-- 用第 5 节的工作流构建出真实产物后，应替换该资产、重建 `libksud.so` 与管理器 APK，并把 `me.weishu.kernelsu.hide` 字符串纳入 `_tools/verify-identity.ps1` 第 4 节的资产闸门（两条路径共有特征之外的这项只有源码构建才有）。
+- 源码产物已上线：DDK CI（`build-lkm-fork.yml`，run `37305609190`，KMI `android15-6.6`）产出的 ko 经 `_tools/adopt-lkm-asset.ps1 -Verify` 收编，`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko` = **315,280 字节 / sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`**，含 `me.weishu.kernelsu.hide`（路径 A）。回退产物归档在 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`。
+- `libksud.so`（arm64-v8a / x86_64）与 release APK 已按新资产重建；`_tools/verify-identity.ps1 -RequireSourceBuild` 把「资产必须源自源码构建」变成可执行闸门（路径 B 直接 FAIL）。`_tools/verify-init-boot.py` 为引导镜像提供独立复核（自带解析器，不共用 producer 代码）。
+- 仍可继续的加固（可选）：把 `build-lkm.yml` 的 8 个 KMI 全矩阵跑一遍，收编其余 aarch64 KMI，降低第 445 行记录的「单一 KMI」脆弱性。
