@@ -31,12 +31,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Download aarch64 modules
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: aarch64-*-lkm
           path: ci-out/aarch64
       - name: Download x86_64 modules
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: x86_64-*-lkm
           path: ci-out/x86_64
