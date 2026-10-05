@@ -157,14 +157,14 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 
 - 校验闸门同时是两条路径的判据：路径 A 的产物含 `me.weishu.kernelsu.hide` 字符串（只有真正定义 `KSU_MANAGER_PACKAGE` 才会出现），路径 B 的产物没有；`_tools/verify-identity.ps1 -RequireSourceBuild` 把包名这一项作为闸门（缺字符串即 FAIL），不带该开关时只报 `provenance=path A/path B` 的 WARN。
 
-**镜像产物（源码 ko + 冠位预置）**：`_tmp/init_boot_a_sourceko_appid10627.img`（8,388,608 字节，sha256 `4fbe9ef40eb0c38a52954527010f9085a07e7236cce26b6c3114e0a5d230f844`），构建方式：
+**镜像产物（源码 ko + 冠位预置 + 32601 驱动）**：`_tmp/flash/init_boot_a_32601_appid10627.img`（8,388,608 字节，sha256 `43f6fbe63e18f8d6d9a16763378543c6626015b1a4d85821ac9e2b719c772cf3`，内嵌 ko 315,280 字节 sha256 `fefb635be691a6484a45c5d86e7d5ac7e04a44c0069be36f572ae9d8590bad1d`，`identity-lib.ps1` 的 `Find-KsuVersion` 读出 32601/flags 0x1）；基座是上一版 `_tmp/init_boot_a_sourceko_appid10627.img`（sha256 `4fbe9ef40eb0c38a52954527010f9085a07e7236cce26b6c3114e0a5d230f844`，驱动版本仍是 16），构建方式：
 
 ```powershell
 python _tools/patch-init-boot.py --base <当前已刷镜像> --out <out.img> `
     --replace-ko userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko --manager-appid <uid%100000>
 ```
 
-ko 大小变了（315176 -> 315280），工具会重排 newc 归档而不是原地覆盖。独立复核（不共用 producer 代码）：`_tools/verify-init-boot.py <img> --expect-appid 10627 --require-source-build` -> 7 项全 PASS；对旧的路径 B 镜像同参数 2 项 FAIL（产地 + 冠位），证明判据有效。
+ko 大小变了（315176 -> 315280），工具会重排 newc 归档而不是原地覆盖。独立复核（不共用 producer 代码）：`_tools/verify-init-boot.py <img> --expect-appid 10627 --require-source-build` -> 7 项全 PASS；对旧的路径 B 镜像同参数 2 项 FAIL（产地 + 冠位），证明判据有效；32601 版镜像（`_tmp/flash/init_boot_a_32601_appid10627.img`，基座 = 上面那份源码 ko 镜像）同样 7 项全 PASS，并已推送到设备 `/data/local/tmp/init_boot_a_32601_appid10627.img` 待刷入（`su -c 'dd if=/data/local/tmp/init_boot_a_32601_appid10627.img of=/dev/block/by-name/init_boot_a'` 后重启）。
 
 ## 5. 注意事项（踩过的坑）
 
