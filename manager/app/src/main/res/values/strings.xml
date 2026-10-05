@@ -430,6 +430,7 @@
     <string name="ai_access_scope_elevate_title">Raise the AI access scope?</string>
     <string name="ai_access_scope_elevate_message">After raising the scope the assistant may read and change: %1$s</string>
     <string name="ai_access_scope_confirm_button">Raise scope</string>
+    <string name="ai_access_scope_restore">Restore the previous scope: %1$s</string>
     <!-- AI assistant: console (phase 2) -->
     <string name="ai_console_title">AI console</string>
     <string name="ai_console_clear">Clear</string>

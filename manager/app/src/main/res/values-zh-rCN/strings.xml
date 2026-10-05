@@ -424,6 +424,7 @@
     <string name="ai_access_scope_elevate_title">提升 AI 访问范围？</string>
     <string name="ai_access_scope_elevate_message">提升后，AI 将可以读取和修改：%1$s</string>
     <string name="ai_access_scope_confirm_button">确认提升</string>
+    <string name="ai_access_scope_restore">恢复上一档：%1$s</string>
     <!-- AI 助手：控制台（阶段 2） -->
     <string name="ai_console_title">AI 控制台</string>
     <string name="ai_console_clear">清空对话</string>

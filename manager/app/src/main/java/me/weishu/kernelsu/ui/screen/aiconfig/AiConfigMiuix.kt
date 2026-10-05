@@ -406,6 +406,22 @@ fun AiConfigPagerMiuix(
                                 },
                                 onClick = actions.onOpenScopeSheet,
                             )
+                            uiState.restoreScope?.let { previous ->
+                                // The scope change itself is recorded in the audit file; this is
+                                // the settings-side way back, so the assistant history stays clean.
+                                Text(
+                                    text = stringResource(
+                                        R.string.ai_access_scope_restore,
+                                        stringResource(previous.labelRes),
+                                    ),
+                                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                                    color = colorScheme.primary,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { actions.onRestoreScope() }
+                                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                                )
+                            }
                         }
                     }
                 }

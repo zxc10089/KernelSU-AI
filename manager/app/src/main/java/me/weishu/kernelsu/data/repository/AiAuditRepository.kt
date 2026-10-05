@@ -16,6 +16,12 @@ interface AiAuditRepository {
     /** Newest first, at most [limit] entries. Unreadable lines are skipped, not fatal. */
     suspend fun read(limit: Int = MAX_ENTRIES): List<AiAuditEntry>
 
+    /**
+     * Newest entry with this [kind] and [origin], or null. Lets a screen restore a value it wrote
+     * earlier without reading - and therefore without showing - the assistant history.
+     */
+    suspend fun latest(kind: String, origin: String): AiAuditEntry?
+
     companion object {
         const val FILE_NAME = "ai_audit.jsonl"
 

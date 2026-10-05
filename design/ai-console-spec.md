@@ -299,7 +299,7 @@
 
 入口：控制台顶栏 actions 图标（Miuix `MiuixIcons.Undo`，Material `Icons.AutoMirrored.Outlined.Article`）。
 
-数据源：`AiAuditRepositoryImpl().read(limit = 200)`（`filesDir/ai_audit.jsonl`，JSON Lines，Mutex 串行 append / trim / read），按 ts 倒序展示。
+数据源：`AiAuditRepositoryImpl().read(limit = 200)` 之后过滤 `origin == assistant`（`filesDir/ai_audit.jsonl`，JSON Lines，Mutex 串行 append / trim / read），按 ts 倒序展示：这一页是 AI 的动作轨迹，不是用户设置的变更日志。
 
     [ AI 操作历史 ]
     +--------------------------------------------------------------+
@@ -319,7 +319,7 @@
 | module | enabled | `execute(AiAction.EnableModule(target))` |
 | module | disabled | `execute(AiAction.DisableModule(target))` |
 | move_to_trash | 原路径 | `mv <after> <before>`（回收站还原）后写审计 |
-| SCOPE_CHANGE | 档位键名 | `settings.accessScope = AiAccessScope.fromKey(before)` |
+| SCOPE_CHANGE | 档位键名 | `settings.accessScope = AiAccessScope.fromKey(before)`（该行不再出现在本页；配置页的「恢复上一档」走同一读取路径 `AiAuditRepository.latest(SCOPE_CHANGE, user)`） |
 | 其他 | — | 不支持，行内不出现撤销按钮 |
 
 | 规格项 | 值 |
@@ -468,8 +468,8 @@
 
 | 方向 | 流程 | 审计 |
 | --- | --- | --- |
-| 升档 | 选择目标档 → STRICT 强拦截弹窗 → 单击确认 → 生效 | AiAuditEntry(kind = SCOPE_CHANGE, target / before / after / scope, undoable = true) |
-| 降档 | 选择目标档 → 立即生效，无弹窗 | 同上（可撤销，撤销即回到上一档） |
+| 升档 | 选择目标档 → STRICT 强拦截弹窗 → 单击确认 → 生效 | AiAuditEntry(kind = SCOPE_CHANGE, origin = user, target / before / after / scope, undoable = true)，不进「AI 操作历史」 |
+| 降档 | 选择目标档 → 立即生效，无弹窗 | 同上（配置页「恢复上一档」即回到上一档） |
 | 失败 | 越界访问被拒 | result = denied |
 
 ---
@@ -555,7 +555,7 @@
 | A6 | 升档弹窗出现且「确认提升」初始即可点 | 源码：`ui/component/{miuix,material}/AiScopeElevationDialog.kt` 中无 keyword / enabled 门控；运行时点按钮 |
 | A7 | 降档不弹窗、立即生效 | 源码：isElevationFrom 为 false 时不进入该弹窗；运行时切回低档 |
 | A8 | 「执行高危命令前强制确认」开关为 on 且不可关闭 | 源码 + 运行时 checked = true、enabled = false |
-| A9 | 每次档位变更写审计（含 before / after / undoable） | 运行时读 `filesDir/ai_audit.jsonl` 的新增行 |
+| A9 | 每次档位变更写审计（含 before / after / undoable / `origin = user`），但不出现在 AI 操作历史 | 运行时读 `filesDir/ai_audit.jsonl` 的新增行，并打开操作历史确认无「范围变更」行 |
 | A10 | Miuix 与 Material 两种模式均可用 | 双模式各走一轮 |
 | A11 | 控制台动作分级：SILENT 无弹窗、LIGHT 走共享弹窗、STRICT 红色弹窗（单击确认） | 源码：`data/agent/AiPathGuard.kt`；运行时结合 [AI_AGENT] 日志 |
 | A12 | 权限审查页列出真实 root 授权并给出 HIGH / MEDIUM / LOW 标签 | 源码：`ui/viewmodel/AiPermissionReviewViewModel.kt`；运行时读行与标签 |
@@ -576,7 +576,7 @@
 | A27 | 附件 chip 出现在容器内、文字区上方，✕ 可单个移除，有附件时无文字也能发送 | 运行时读 chip 位置与发送按钮可用态 |
 | A28 | 重设计未破坏计划模式管线（模式切换、生成计划卡、步骤 Proposed） | 运行时结合 [AI_AGENT] 日志与计划卡 |
 | A29 | Material flavour 与 Miuix 结构一致 | 切换 UI Style 后逐项对照 |
-| A30 | AI 操作历史里「访问范围变更 / 撤销」条目不显示裸枚举（NONE / DATA_ADB / ROOT_FS），而是本地化范围名 | 运行时读行副标题与展开详情 |
+| A30 | AI 操作历史只出现 AI 的动作（「撤销」条目不显示裸枚举，而是本地化范围名）；用户档位变更显示在配置页的「恢复上一档」 | 运行时读行副标题与展开详情 |
 | A31 | 标题行「清空」是图标 + 短标签胶囊而非纯文字按钮 | 源码：`AiConsoleMiuix.kt` 的 clip(RoundedCornerShape(16.dp)) 胶囊；运行时对照 |
 | A32 | 流式回复增长时列表尾部跟随，末行文字不被 composer 上边缘切断 | 源码：消息列表 `contentPadding(top = 4.dp, bottom = 12.dp)`；运行时观察末行与容器上边缘 |
 | A33 | 空对话时「清空」胶囊为可见禁用态（不再与可点状态同形） | 运行时对照空 / 非空两种状态 |

@@ -305,7 +305,7 @@ val runtimeMode = when {
 
 `data/agent/AiAccessScope.kt` 定义三档：`NONE`（默认，fail-closed）、`DATA_ADB`、`ROOT_FS`。派生属性包括 `canReadFiles`、`coversDataAdb`、`coversRoot`；`isElevationFrom(current)` 用 ordinal 比较判断是否为升档；旧的布尔开关通过 `fromLegacyAllowModuleDir` 迁移。
 
-口径：升档必须显式确认（弹窗），降档立即生效并写审计。所有文件类动作都要求路径落在当前范围内，范围不足时不是静默失败而是拒绝并记录。
+口径：升档必须显式确认（弹窗），降档立即生效并写审计（`origin = user`，不进入「AI 操作历史」；配置页访问范围下方提供「恢复上一档」）。所有文件类动作都要求路径落在当前范围内，范围不足时不是静默失败而是拒绝并记录。
 
 ### 5.4 动作管线与安全分级
 
@@ -335,7 +335,7 @@ val runtimeMode = when {
 
 安装与制作的闸门有意不对称：`InstallModule` 只需在批量规则下升级（载荷由用户提供），而 `MakeModule` 恒 STRICT —— 它是唯一由模型撰写载荷的动作，且其中的 `customize.sh` 最终由 ksud 以 root 身份执行。
 
-审计：`data/repository/AiAuditRepositoryImpl.kt` 把动作写入 `filesDir/ai_audit.jsonl`，只保留最近若干条；`data/agent/AiAuditUndo.kt` 为可撤销动作提供撤销，审计条目记录动作类型、目标、结果与是否可撤销。
+审计：`data/repository/AiAuditRepositoryImpl.kt` 把动作写入 `filesDir/ai_audit.jsonl`，只保留最近若干条；`data/agent/AiAuditUndo.kt` 为可撤销动作提供撤销，审计条目记录动作类型、目标、结果与是否可撤销，并带 `origin`：AI 执行链写入 `assistant`，用户在设置页的动作写入 `user`；`ui/screen/aiaudit/` 只展示 `assistant` 条目，旧数据里缺 `origin` 的 `SCOPE_CHANGE` 行读取时按 `user` 兜底。
 
 ### 5.5 计划模式
 
@@ -368,7 +368,7 @@ val runtimeMode = when {
 
 - 权限审查页（`ui/screen/aipermission/`）列出持有 root 的应用，可把结果交给控制台分析（`ROOT_REVIEW`）。
 - 模块冲突页（`ui/screen/aiconflict/`，配合 `data/model/ModuleConflict.kt` 与仓库实现）扫描已启用模块并给出冲突结论（`MODULE_CONFLICT`）。
-- 审计页（`ui/screen/aiaudit/`）展示动作记录，并对可撤销动作提供撤销入口。
+- 审计页（`ui/screen/aiaudit/`）只展示 AI 的动作记录（`origin = assistant`），并对可撤销动作提供撤销入口；用户自己的档位变更不进该页，改由配置页「恢复上一档」处理。
 
 ### 5.9 界面与本地化
 
@@ -557,7 +557,7 @@ cargo fmt
 | HTTP 超时 | 连接 15 s、读写各 120 s、整体 300 s，不使用缓存 | `data/remote/AiHttpClient.kt` |
 | 批量升级阈值 | `BATCH_STRICT_THRESHOLD = 3` | `data/agent/AiPathGuard.kt` |
 | 回收站根目录 | `/data/adb/.ai_trash` | `data/agent/AiActionExecutor.kt` |
-| 审计保留条数 | `2000` | `data/repository/AiAuditRepository.kt` |
+| 审计保留条数 | `2000` | `data/repository/AiAuditRepository.kt`（条目含 `origin`：`assistant` / `user`） |
 | 附件：文件 / 图片 / 文本 / 压缩包条目 | 8 MB / 5 MB / 64000 字符 / 10 × 4000 字符 | `ui/screen/aiassistant/AiAttachments.kt` |
 | 模块草稿上限 | 20 个文件、单文件 64 KB、合计 128 KB、安装脚本 32 KB | `data/modulemaker/ModuleDraft.kt` |
 | 安装器输出截断 | `6000` 字符 | `data/modulemaker/ModuleMaker.kt` |

@@ -39,7 +39,13 @@ class AiAuditViewModel(
     fun refresh() {
         _uiState.update { it.copy(loading = true, error = false) }
         viewModelScope.launch {
-            runCatching { repository.read(READ_LIMIT) }.fold(
+            // The page is the assistant's trail: a settings change the user made on their own
+            // screens is recorded in the same file but is not an assistant action, so it is
+            // dropped here. The filter runs after the read on purpose - the limit counts file
+            // rows, and filtering inside the repository would let user rows eat the window.
+            runCatching {
+                repository.read(READ_LIMIT).filter { it.origin == AiAuditEntry.ORIGIN_ASSISTANT }
+            }.fold(
                 onSuccess = { entries ->
                     _uiState.update {
                         it.copy(
