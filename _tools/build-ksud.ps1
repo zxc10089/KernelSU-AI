@@ -207,6 +207,54 @@ Write-Host "CARGO_HOME=$env:CARGO_HOME"
 Write-Host "ANDROID_NDK_HOME=$env:ANDROID_NDK_HOME"
 Write-Host "workspace=$ws\Cargo.toml"
 
+# --- LKM asset identity gate ------------------------------------------------------------------
+# rust-embed packs userspace/ksud/bin/<abi>/*_kernelsu.ko INTO the daemon, and that module is what a
+# boot-image patch injects. The module carries the manager identity the KERNEL enforces: the SHA-256
+# of the manager's v2 signing certificate and its DER length. If it still whitelists the public
+# Android debug cert, ANY app signed with the stock debug keystore can be crowned instead of this
+# manager (measured on device 67a86199: moe.nb4a.debug won the crown). Refuse to embed a module that
+# does not carry the project signer, so the defect cannot silently come back through the APK.
+#   public facts : _tools/project-signer.json  (certSha256, certDerSize)
+#   how to patch : _tools/patch-init-boot.py --ko-in <ko> --ko-out <ko> --signer-sha256 <hash> --signer-size <len>
+# A REAL module build (needs a DDK, not available here) produces the same constants through Kbuild:
+#   make KSU_EXPECTED_SIZE=0x342 KSU_EXPECTED_HASH=<hash> KSU_MANAGER_PACKAGE=me.weishu.kernelsu.hide
+$signerJson = Join-Path $ws '_tools\project-signer.json'
+$assetRoot  = Join-Path $ws 'userspace\ksud\bin'
+if (Test-Path $signerJson) {
+    $signer   = Get-Content -LiteralPath $signerJson -Raw | ConvertFrom-Json
+    $wantHash = "$($signer.certSha256)".ToLower()
+    $wantSize = [int]$signer.certDerSize
+    $assets = @()
+    if (Test-Path $assetRoot) {
+        $assets = Get-ChildItem -Path $assetRoot -Recurse -Filter '*_kernelsu.ko' -File -ErrorAction SilentlyContinue
+    }
+    if ($assets.Count -eq 0) {
+        Write-Host "LKM asset  : none under $assetRoot"
+    }
+    foreach ($asset in $assets) {
+        $bytes = [System.IO.File]::ReadAllBytes($asset.FullName)
+        $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+        $nHash = ([regex]::Matches($text, [regex]::Escape($wantHash))).Count
+        $immOk = $false
+        $found = ''
+        for ($i = 0x1000; $i -lt ($bytes.Length - 4); $i += 4) {
+            $w = [int64][BitConverter]::ToUInt32($bytes, $i)
+            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
+                $imm = ($w -shr 10) -band 0xFFF
+                if (-not $found) { $found = ('0x{0:X}' -f $imm) }
+                if ($imm -eq $wantSize) { $immOk = $true; break }
+            }
+        }
+        if ($NoVerify) {
+            Write-Host "LKM asset  : $($asset.Name) VERIFY SKIPPED (-NoVerify)"
+        } elseif ($nHash -lt 1 -or -not $immOk) {
+            throw ("LKM asset {0} does not carry the project signer identity (cert-hash x{1}, cmp-size {2}, want {3} = 0x{4:X}). Patch it first: powershell -NoProfile -ExecutionPolicy Bypass -File _tools\patch-init-boot.py --ko-in <asset> --ko-out <asset> --signer-sha256 {5} --signer-size {3}" -f $asset.FullName, $nHash, $found, $wantSize, $wantSize, $wantHash)
+        } else {
+            Write-Host ("LKM asset  : {0} OK (cert {1}, cmp-size {2})" -f $asset.Name, $wantHash, $found)
+        }
+    }
+}
+
 Set-Location $ws
 
 $targets = @('arm64-v8a', 'x86_64')

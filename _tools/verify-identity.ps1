@@ -18,7 +18,10 @@ param(
     [string]$WorkTree = '',
     [string]$ExpectedPackage = 'me.weishu.kernelsu.hide',
     # SHA-256 of the manager signing cert whitelisted in the patched LKM (kernel-enforced identity).
-    [string]$ExpectedCert = 'f9af24bdd3c0a4947c06eb3a3bd40c25f08e19fd1a07393ec07c6ace40e63d0e',
+    # PROJECT key since 2026-10-05: the old value here was the PUBLIC Android debug cert, which any
+    # app signed with the stock debug keystore also matches -- that is the defect this script exists
+    # for. Public facts: _tools/project-signer.json.
+    [string]$ExpectedCert = 'ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec',
     # Optional explicit APK to inspect. When omitted, the newest release/debug APK is used.
     [string]$Apk = '',
     # Workspace root that contains the repository and .toolchain; defaults to this repo's parent.
@@ -189,6 +192,60 @@ if (-not $Apk -or -not (Test-Path $Apk)) {
         }
     } else {
         Warn "apksigner not found" $apksigner
+    }
+}
+
+Write-Host ""
+Write-Host "=== 4. LKM asset identity (the cert and DER length the KERNEL whitelists) ==="
+# userspace/ksud/bin/<arch>/*_kernelsu.ko is the module rust-embed packs into libksud.so and the
+# module a boot-image patch injects, so it must carry the PROJECT signer. If it still whitelists the
+# public debug cert, any app signed with the stock debug keystore can be crowned instead of this
+# manager (measured on device 67a86199: moe.nb4a.debug won the crown). The ko is a binary and there
+# is no local DDK, so the constants are patched in place -- see docs/root-crown-appid-fix.md and
+# _tools/patch-init-boot.py --ko-in/--ko-out.
+$signerJson = Join-Path $ws '_tools\project-signer.json'
+$wantHash = $ExpectedCert.ToLower()
+$wantSize = 0
+if (Test-Path $signerJson) {
+    $signer = Get-Content -LiteralPath $signerJson -Raw | ConvertFrom-Json
+    $wantHash = "$($signer.certSha256)".ToLower()
+    $wantSize = [int]$signer.certDerSize
+    Write-Host ("       project-signer.json: certSha256=$wantHash certDerSize=$wantSize (0x$('{0:X}' -f $wantSize))")
+    if ($wantHash -ne $ExpectedCert.ToLower()) {
+        Warn "ExpectedCert differs from project-signer.json" "-ExpectedCert=$($ExpectedCert.ToLower()) json=$wantHash"
+    }
+} else {
+    Warn "no _tools/project-signer.json" "cannot read the project cert size: $signerJson"
+}
+$assetRoot = Join-Path $ws 'userspace\ksud\bin'
+$assets = @()
+if (Test-Path $assetRoot) {
+    $assets = Get-ChildItem -Path $assetRoot -Recurse -Filter '*_kernelsu.ko' -File -ErrorAction SilentlyContinue
+}
+if ($assets.Count -eq 0) {
+    Warn "no LKM asset under userspace\ksud\bin" $assetRoot
+} else {
+    foreach ($asset in $assets) {
+        $bytes = [System.IO.File]::ReadAllBytes($asset.FullName)
+        $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
+        $nHash = ([regex]::Matches($text, [regex]::Escape($wantHash))).Count
+        $immOk = $false
+        $found = ''
+        for ($i = 0x1000; $i -lt ($bytes.Length - 4); $i += 4) {
+            $w = [int64][BitConverter]::ToUInt32($bytes, $i)
+            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
+                $imm = ($w -shr 10) -band 0xFFF
+                if (-not $found) { $found = ('0x{0:X}' -f $imm) }
+                if ($wantSize -gt 0 -and $imm -eq $wantSize) { $immOk = $true; break }
+            }
+        }
+        $rel = $asset.FullName.Substring($ws.Length + 1)
+        $sha = (Get-FileHash -Algorithm SHA256 $asset.FullName).Hash
+        Check "LKM asset carries the project cert SHA-256" ($nHash -ge 1) "$rel hash-literal x$nHash (want >= 1)"
+        if ($wantSize -gt 0) {
+            Check "LKM asset expects the project cert DER length" $immOk "$rel cmp-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
+        }
+        Write-Host ("       {0} size={1} sha256={2}" -f $rel, $bytes.Length, $sha)
     }
 }
 

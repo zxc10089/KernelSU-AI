@@ -6,27 +6,35 @@ Why this tool exists
 The prebuilt kernelsu.ko bundled in this fork (userspace/ksud/bin/<arch>/*_kernelsu.ko)
 is compiled WITHOUT -DKSU_MANAGER_PACKAGE, so kernel/manager/apk_sign.c
 is_manager_apk() only compares the APK signing certificate (DER size + sha256).
-The manager APK shipped by this project is signed with the PUBLIC AOSP debug key,
-so ANY app signed with that same key can be crowned first by the /data/app walk
-in track_throne() -> search_manager() -> is_manager_apk(). When that happens
-ksu_manager_appid points at the other app and the KernelSU manager app shows
-"未安装" with no root.
+Any APK signed with the cert baked into that ko can be crowned by the /data/app
+walk in track_throne() -> search_manager() -> is_manager_apk(), and the winner
+keeps the crown until it is uninstalled. 2026-10-05 incident: the baked-in cert
+was the PUBLIC AOSP debug key, so moe.nb4a.debug was crowned first and the
+manager app showed "未安装" with no root.
 
-Seeding ksu_manager_appid (kernel/manager/throne_tracker.c:15) inside the ko
-.data section makes the driver crown the intended manager at load time and the
-appid is preserved forever: track_throne() only searches when the crowned uid
-is absent from /data/system/packages.list.
+Two project-level fixes are applied to the ko inside a boot/init_boot image:
+
+  * --signer-sha256 / --signer-size : the two compile-time constants compared by
+    check_v2_signature(). Point them at the PROJECT release cert
+    (_tools/project-signer.json; currently ca40af…/834) so no other app matches.
+  * --manager-appid : seeds ksu_manager_appid (kernel/manager/throne_tracker.c:15)
+    in the ko .data section, so the driver crowns the intended manager at load
+    time, independent of the fsnotify/zygote trigger. track_throne() only
+    re-searches when the crowned uid is absent from /data/system/packages.list,
+    so a valid seeded appid stays crowned.
 
 Runtime module reload is NOT an option: rmmod kernelsu panics this kernel.
 The fix must live in the flashed image, which is what this tool produces.
 
 Usage
 -----
+  # recommended delivery: project cert + appid seed in one image
   python patch-init-boot.py --base init_boot_a.img --out init_boot_a_fixed.img \
-      --manager-appid 10626
+      --signer-sha256 ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec \
+      --signer-size 834 --manager-appid 10626
   python patch-init-boot.py --base in.img --out out.img --dump-ko ko.bin
-  python patch-init-boot.py --base in.img --out out.img \
-      --signer-sha256 <64 hex> --signer-size 744
+  python patch-init-boot.py --ko-in in.ko --ko-out out.ko \
+      --signer-sha256 <64 hex> --signer-size 834
 
 What it does
 ------------
@@ -232,24 +240,28 @@ def patch_signer(ko: bytearray, sha256hex, size) -> bool:
                 len(hits), [(hex(i), v[:8]) for i, v in zip(hits, old)]))
             return False
     if size is not None:
+        # cmp w21, #imm  ==  SUBS WZR, W21, #imm  => Rd = 31 (WZR); sh=0
+        SHAPE = 0x71000000 | (21 << 5) | 31
+        POS_MASK = ~(0xFFF << 10) & 0xFFFFFFFF
         pos = bytes(ko).find(CMP_PATTERN)
         if pos < 0:
             pos = CMP_OFF_DEFAULT
-            if bytes(ko)[pos:pos + 4] == CMP_REPLACE:
-                print("signer-size : already patched at 0x%x" % pos)
-                pos = -1
-            else:
-                print("FATAL: cmp size pattern not found at the documented offset 0x%x" % pos)
+            word = struct.unpack_from("<I", ko, pos)[0]
+            if word & POS_MASK != SHAPE:
+                print("FATAL: no 'cmp w21, #imm' at the documented offset 0x%x: %s" % (pos, bytes(ko)[pos:pos + 4].hex()))
                 return False
         if pos >= 0:
             if not (0 < size < 4096):
-                print("FATAL: --signer-size %d out of range" % size)
+                print("FATAL: --signer-size %d out of range (12-bit immediate)" % size)
                 return False
-            word = 0x71000000 | (size << 10) | (21 << 5) | 21
-            enc = struct.pack("<I", word)
-            print("signer-size : cmp w21,#0x%x at file offset 0x%x: %s -> %s" % (
-                size, pos, bytes(ko)[pos:pos + 4].hex(), enc.hex()))
-            ko[pos:pos + 4] = enc
+            cur_imm = (struct.unpack_from("<I", ko, pos)[0] >> 10) & 0xFFF
+            if cur_imm == size:
+                print("signer-size : already cmp w21,#%d at 0x%x (no change)" % (size, pos))
+            else:
+                enc = struct.pack("<I", 0x71000000 | (size << 10) | (21 << 5) | 31)
+                print("signer-size : cmp w21,#0x%x at file offset 0x%x: %s -> %s" % (
+                    size, pos, bytes(ko)[pos:pos + 4].hex(), enc.hex()))
+                ko[pos:pos + 4] = enc
     return True
 
 
@@ -337,8 +349,9 @@ def main():
     if args.manager_appid is not None and not patch_manager_appid(ko, args.manager_appid):
         return 2
 
-    if (args.signer_sha256 or args.signer_size is not None) and not             patch_signer(ko, args.signer_sha256, args.signer_size):
-        return 2
+    if args.signer_sha256 or args.signer_size is not None:
+        if not patch_signer(ko, args.signer_sha256, args.signer_size):
+            return 2
     new_cpio = bytearray(cpio)
     new_cpio[ko_mem["data_off"]:ko_mem["data_off"] + ko_mem["size"]] = ko
     new_cpio = bytes(new_cpio)

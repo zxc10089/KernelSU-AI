@@ -1,0 +1,12 @@
+﻿{
+    "alias":  "kernelsu-ai",
+    "keyAlgorithm":  "RSA",
+    "keySize":  2048,
+    "storeType":  "JKS",
+    "certSha256":  "ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec",
+    "certDerSize":  834,
+    "certDerSizeHex":  "0x342",
+    "keystore":  "D:\\ai\\KernelSU\\_artifacts\\builder\\keystore\\kernelsu-ai-release.jks",
+    "generatedAtUtc":  "2026-10-05T10:13:42Z",
+    "dname":  "CN=KernelSU-AI, OU=KernelSU-AI, O=zxc10089, C=CN"
+}

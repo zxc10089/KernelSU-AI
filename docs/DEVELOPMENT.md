@@ -62,12 +62,14 @@
 
 内核侧的唯一判定入口是 `kernel/manager/apk_sign.c` 的 `is_manager_apk()`，它调用 `check_v2_signature(path, EXPECTED_SIZE, EXPECTED_HASH)`：
 
-- 期望值来自 `kernel/Kbuild`：`KSU_EXPECTED_SIZE := 0x033b`（827，官方证书 DER 长度）与 `KSU_EXPECTED_HASH := c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6`，通过 `ccflags-y` 导出为 `-DEXPECTED_SIZE` / `-DEXPECTED_HASH`。
+- 期望值来自 `kernel/Kbuild`：默认 `KSU_EXPECTED_SIZE := 0x033b`（827，官方证书 DER 长度）与 `KSU_EXPECTED_HASH := c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6`，通过 `ccflags-y` 导出为 `-DEXPECTED_SIZE` / `-DEXPECTED_HASH`。**本分支 2026-10-05 起改用项目自签证书**：`KSU_EXPECTED_SIZE=0x342`（834）与 `KSU_EXPECTED_HASH=ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec`；公开事实记录在 `_tools/project-signer.json`，私钥与口令在 `_artifacts/builder/keystore/`（`keystore.properties` 不入库）。
 - 若同时定义了 `KSU_EXPECTED_SIZE2` 与 `KSU_EXPECTED_HASH2`，`is_manager_apk()` 会再比对第二张证书；只给长度不给哈希会在构建期直接报错。
 - 解析 APK Signing Block（magic `APK Sig Block 42`）：v2 块（id `0x7109871a`）必须存在；一旦出现 v3（`0xf05368c0`）或 v3.1（`0x1b93ad61`）直接判失败；遇到 ZIP64 直接放弃判定。
 - 比对分两步：先比证书 DER 长度，再把证书哈希转成小写十六进制字符串做 `strcmp`。
 
 对本分支的约束由此确定：release 包必须保持 v2-only 签名；必须使用与补丁 LKM 内置白名单一致的 keystore；证书 DER 长度必须精确匹配。任何一项不符，安装后设备都不认这个管理器（表现为界面显示未安装、底栏消失）。
+
+> 2026-10-05 实测教训：白名单若用**公开**的 Android debug 证书，设备上任何同样用 debug key 签名的应用都能竞争加冕。真机上 `moe.nb4a.debug`（uid 10523）抢先拿走王冠，管理器此后永远拿不到 root 授权（`perm.c` 的 `allowed_for_su()` 只看 `is_manager()`）。因此白名单必须是项目私钥，且编译 ko 时应同时定义 `KSU_MANAGER_PACKAGE`。完整根因、补丁与刷机步骤见 `docs/root-crown-appid-fix.md`。
 
 ### 3.2 补丁 LKM 与内置资产
 
@@ -79,7 +81,7 @@
 补丁是对 ko 做等长字节替换：
 
 - 64 字符的期望哈希串替换为本分支证书的 SHA-256。
-- `cmp w21, #0x33b` 改为 `cmp w21, #0x2e8`，即期望的证书 DER 长度由 827 改为 744。
+- `cmp w21, #0x33b` 改为目标证书的 DER 长度（历史上是 744 = `0x2e8`；2026-10-05 起是本项目私钥证书的 834 = `0x342`）。该指令在整个模块里只出现一次，`_tools/patch-init-boot.py` 按「`SUBS WZR, W21, #imm`」的指令形状定位它，因此改长度不必手抄偏移。
 - 注意定位方式：反汇编工具输出的偏移是 `.text` 段内偏移，与文件偏移相差段起始地址；直接按反汇编偏移改文件会改错位置。本模块两处改动的文件偏移为：`cmp` 指令 43108（`0xa864`，全文件仅出现一次），证书哈希字面量 112938（`0x1b92a`）。查字节时用 Latin-1 解码后做子串匹配，逐字节拼十六进制串在大文件上不可靠。
 
 内置方式与运行期取用：
@@ -89,7 +91,7 @@
 - `userspace/ksud/src/late_load.rs` 在 LKM 模式下以 `format!("{kmi}_kernelsu.ko")` 取资产并加载；KMI 缺省时向 `boot_patch::get_current_kmi()` 询问。
 - `userspace/ksud/src/boot_patch.rs` 在给 GKI 镜像打补丁时同样按 `{kmi}_kernelsu.ko` 取 ko，并取 `ksuinit` 作为 init 载荷，最终把两者写进 cpio。
 
-当前内置的 ko 是打过补丁的版本：`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`（315176 字节，sha256 `eefc53db7e533a2de8c7968bd28adc276b1f7291e95fbdb8e760e62234b89f64`），其中本分支证书哈希位于文件偏移 112938，而官方哈希在整个文件中不存在。这可以用作「内置资产是否已换成我方版本」的判据。
+当前内置的 ko 是打过补丁的版本：`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`（315176 字节，sha256 `d537e0d76969a7dab712926b292dc66e23f6ba915067e615486d829a738c9178`），其中项目证书哈希 `ca40af…3eec` 位于文件偏移 112938（`0x1b92a`）、`cmp w21,#0x342` 位于 43108（`0xa864`），官方哈希 `c371061b…` 与 debug 证书哈希 `f9af24bd…` 在整个文件中都不存在。`_tools/build-ksud.ps1` 在打包资产前会跑资产闸门，`_tools/verify-identity.ps1` 第 4 节复核同一对特征，不匹配即失败——这两条就是「内置资产是否已换成我方版本」的判据（也是「刷了镜像仍拿不到 root」这类故障的根因闸门）。
 - 该 ko 与 `ksuinit` 随仓库分发（`userspace/ksud/bin/aarch64/`）：上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 注入的产物，本分支没有 CI，因此对这两个文件加了放行规则。`userspace/ksud/bin/x86_64/` 有 `busybox` 与按上游 ksuinit.yml 的静态链接 recipe 本机构建的 `ksuinit`（无动态依赖）；x86_64 的 `_kernelsu.ko` 由上游 `ddk-lkm.yml` 在 Android DDK 容器里生成，本机没有该容器，因此该架构的 LKM 模式缺少内置资产。
 
 后果：只要刷入或加载这个 ko，管理器身份即为本分支；换 keystore 或换 KMI 都需要重新补丁并重新内置。
@@ -100,7 +102,7 @@
 - `userspace/ksud/build.rs` 在未设置该变量时回落到上游名 `me.weishu.kernelsu` 并打 `cargo:warning`；它也声明了 `cargo:rerun-if-env-changed=KSU_PACKAGE_NAME`，因此先跑一次未设置变量的构建、再设置变量重建是安全的。
 - 若 daemon 用了回落值，运行期会去 force-stop 并拉起官方管理器，并把 boot 备份写到官方数据目录。
 
-由于上游没有任何地方设置该变量（`userspace/ksud/` 下没有 Makefile），它必须由 `_tools/build-ksud.ps1` 显式导出，且必须与 `manager/gradle.properties` 的 `KSU_PACKAGE_NAME` 一致。`_tools/verify-identity.ps1` 把这件事拆成两个独立决定项分别核对：APK 的 applicationId + 签名证书，以及 daemon 二进制内编译进去的包名。
+由于上游没有任何地方设置该变量（`userspace/ksud/` 下没有 Makefile），它必须由 `_tools/build-ksud.ps1` 显式导出，且必须与 `manager/gradle.properties` 的 `KSU_PACKAGE_NAME` 一致。`_tools/verify-identity.ps1` 把这些事拆成四个独立决定项分别核对：APK 的 applicationId、APK 的签名证书（默认值已是项目私钥 `ca40af…`）、daemon 二进制内编译进去的包名，以及 `userspace/ksud/bin/**/*_kernelsu.ko` 资产里内嵌的证书哈希 + DER 长度。`_tools/build-manager.ps1` 会自动从 `_artifacts/builder/keystore/keystore.properties` 读取签名参数并作为 `-PKEYSTORE_FILE/…` 传给 Gradle（文件缺失时退回 debug keystore，并由上面的检查报出来）；`_tools/build-ksud.ps1` 在打包资产前先跑同一个资产闸门。
 
 核对 daemon 包名时不要匹配「包名 + Activity」的拼接串：daemon 把包名与 Activity 后缀存为两个独立的格式参数，该字符串在二进制里永远不会出现，这种检查永远无法失败。正确做法是用带排除的 lookahead 正则，把 `me.weishu.kernelsu.hide`（本分支）与 `me.weishu.kernelsu.ui`（Activity 类路径）列为合法余项。
 
@@ -466,7 +468,7 @@ cargo fmt
 
 1. 先准备 `manager/app/src/main/jniLibs/arm64-v8a/libksud.so`。
 2. `_tools/build-manager.ps1 -Task :app:assembleRelease`。
-3. 若需核对身份：`_tools/verify-identity.ps1 -Apk <apk>`；加 `-SelfTest` 可先验证检查自身既能失败也能通过。
+3. 若需核对身份：`_tools/verify-identity.ps1 -Apk <apk>`；加 `-SelfTest` 可先验证检查自身既能失败也能通过。第 4 节核对内置 LKM 资产是否已换成项目私钥（证书哈希 + DER 长度）——2026-10-05 那次「刷了镜像也拿不到 root」的故障就出在这一项上。
 
 **资源包**
 

@@ -29,18 +29,50 @@ $env:PATH             = "$(Join-Path $env:JAVA_HOME 'bin');$env:PATH"
 # The sandbox blocks the default %TEMP% on C:\, and Gradle's native-service bootstrap
 # cannot unpack/load native-platform.dll -> "Could not initialize native services".
 # org.gradle.native=false falls back to the pure-Java implementations.
+# The same sandbox forbids Gradle's file-system watching: the watcher cannot open the current
+# thread ("Couldn't open current thread, error = 5") and the whole build session aborts, so
+# org.gradle.vfs.watch=false and --no-watch-fs are always set here.
 $tmp = Join-Path $tc 'tmp'
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 $env:TEMP = $tmp
 $env:TMP  = $tmp
-$env:GRADLE_OPTS = "-Dorg.gradle.native=false -Djava.io.tmpdir=$tmp"
+$env:GRADLE_OPTS = "-Dorg.gradle.native=false -Dorg.gradle.vfs.watch=false -Djava.io.tmpdir=$tmp"
 
 $gradle = Join-Path $tc 'gradle-9.7.1\bin\gradle.bat'
 if (-not (Test-Path $gradle)) { throw "Gradle distribution missing: $gradle" }
 
-$args = @($Task, '--console=plain', '--stacktrace')
+$args = @($Task, '--console=plain', '--stacktrace', '--no-watch-fs')
 if ($NoDaemon) { $args += '--no-daemon' }
 if ($Offline)  { $args += '--offline' }
+
+# --- project release signing identity ---------------------------------------------------------
+# The manager's v2 signing certificate is part of the kernel-enforced identity: the patched LKM
+# whitelists its SHA-256 (public facts in _tools/project-signer.json), so a release signed with the
+# old public debug key cannot be crowned on a device running the project-key LKM. The PRIVATE
+# values live in _artifacts\builder\keystore\keystore.properties (never committed); read them here
+# and hand them to the apksign plugin as gradle properties (-PKEYSTORE_FILE=... etc., the property
+# names manager/app/build.gradle.kts configures). Without the file the build keeps its previous
+# behaviour (Android debug keystore) and _tools/verify-identity.ps1 reports the cert mismatch.
+$ksProps = Join-Path $root '_artifacts\builder\keystore\keystore.properties'
+if (Test-Path $ksProps) {
+    $map = @{}
+    foreach ($raw in Get-Content -LiteralPath $ksProps) {
+        $line = $raw.Trim()
+        if (-not $line -or $line.StartsWith('#')) { continue }
+        $eq = $line.IndexOf('=')
+        if ($eq -lt 1) { continue }
+        $map[$line.Substring(0, $eq).Trim()] = $line.Substring($eq + 1).Trim()
+    }
+    foreach ($pair in @(@('KEYSTORE_FILE', 'storeFile'), @('KEYSTORE_PASSWORD', 'storePassword'),
+                        @('KEY_ALIAS', 'keyAlias'), @('KEY_PASSWORD', 'keyPassword'))) {
+        $value = $map[$pair[1]]
+        if (-not $value) { throw "keystore.properties has no value for '$($pair[1])' ($ksProps)" }
+        $args += "-P$($pair[0])=$value"
+    }
+    Write-Host "SIGNING=$ksProps (alias $($map['keyAlias']))"
+} else {
+    Write-Host "SIGNING=Android debug keystore (no $ksProps)"
+}
 
 Write-Host "JAVA_HOME=$env:JAVA_HOME"
 Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
