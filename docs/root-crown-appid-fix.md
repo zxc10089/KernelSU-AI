@@ -95,8 +95,9 @@ python KernelSU-v330\_tools\patch-init-boot.py \
 ```
 
 注意：内置资产里**只换证书**、不要把 appid 预置进去——资产随发行版分发到别的设备，而 appid 是每台设备
-每个安装实例特有的。内置资产当前已是项目证书版（sha256 `d537e0d7…c9178`），`_tools/verify-identity.ps1`
-第 4 节会校验它。
+每个安装实例特有的。内置资产当前已是项目证书版（上游 8 个 KMI × 2 个 ABI 共 16 个文件全部来自源码构建，
+逐项 sha256 见 `docs/upstream-alignment.md` 第 7 节；这里提到的 `d537e0d7…c9178` 是被替换掉的那份路径 B 产物），
+`_tools/verify-identity.ps1` 第 4 节会逐个校验。
 
 ### 3.3 刷入与回滚
 
@@ -142,13 +143,15 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 **路径 A（正式，DDK CI）**：`kernel/Kbuild` 现在把三项身份写成默认值（`0x342` / `ca40af…` / `me.weishu.kernelsu.hide`），与上游给自己写死官方身份的做法一致，因此上游 DDK 工作流无需改动即可构建出正确的 ko：
 
 - 全矩阵：Actions → `Build LKM for KernelSU` → Run workflow（`build-lkm.yml` → `ddk-lkm.yml`，容器 `ghcr.io/ylarod/ddk-min:<kmi>-<ddk_release>`）；
-- 只构建本机需要的 KMI：`.github/workflows/build-lkm-fork.yml`（push `kernel/**` 自动触发，产物名 `aarch64-android15-6.6-lkm`，并把 ko 提交到 `ci/lkm` 分支便于取回）。
+- 源码构建走 CI 矩阵：`.github/workflows/build-lkm-fork.yml`（push `kernel/**` 或该工作流自身变更时自动触发）调用上游 `build-lkm.yml` 的 8 个 KMI，产物名 `{aarch64,x86_64}-<kmi>-lkm`，整批提交到 `ci/lkm` 分支便于取回。
 
 **路径 A 已落地（2026-10-05）**：`.github/workflows/build-lkm-fork.yml` 触发的 DDK CI（run `37305609190`，`Build kernelsu.ko for android15-6.6` 全绿）产出源码构建的 ko，经 `_tools/adopt-lkm-asset.ps1 -Ko <built.ko> -Verify` 收编为内置资产：
 
 - `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`：**315,280 字节**，sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`，含 `me.weishu.kernelsu.hide` 字符串（= `KSU_MANAGER_PACKAGE` 已编译进内核模块，包名校验生效）；同一 CI 产物在 `ci/lkm` 分支留档。
 - 被替换的路径 B 产物归档到 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`（sha256 `d537e0d7…c9178`）。
 - vermagic 四种 ko 副本完全一致（`6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64`），所以源码构建与设备上已在跑的回退产物一样可加载。
+
+**全矩阵已补齐（2026-10-05）**：run `37312303026`（master `85d4955`）把上游 8 个 KMI × 2 个 ABI 全跑绿，16 个产物逐个经 `_tools/adopt-lkm-asset.ps1 -Abi <abi> -Kmi <kmi>` 校验身份后收编进 `userspace/ksud/bin/`；本机设备是 android15-6.6，它的那一份与上面 315,280 字节的产物逐字节相同。逐项字节数与 sha256 见 `docs/upstream-alignment.md` 第 7 节。
 
 **路径 B（回退，本机无 DDK 容器时的应急方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的——只靠「私钥证书唯一」达到同等效果：
 

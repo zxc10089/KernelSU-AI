@@ -120,7 +120,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 ## 已知缺口
 
-- `userspace/ksud/bin/x86_64/` 缺少 `_kernelsu.ko`：上游由 `ddk-lkm.yml` 在 Android DDK 容器里生成，本机没有该容器，因此 x86_64 设备上的 LKM 模式无法从本仓库的资产跑起来（x86_64 的 `ksuinit` 已随仓库分发）。
+- ~~`userspace/ksud/bin/x86_64/` 缺少 `_kernelsu.ko`~~ **已解决（2026-10-05）**：上游 8 个 KMI × 2 个 ABI 的 ko 全部由 DDK CI（run `37312303026`）从源码构建后随仓库分发，逐项哈希见 [docs/upstream-alignment.md](docs/upstream-alignment.md) 第 7 节。
 
 逐项说明见 [docs/开发文档.md](docs/开发文档.md)。
 

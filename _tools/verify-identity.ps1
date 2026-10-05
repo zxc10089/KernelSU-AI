@@ -145,6 +145,36 @@ if ($libs.Count -eq 0) {
 }
 
 Write-Host ""
+Write-Host "=== 2b. every shipped KMI is really embedded in the matching libksud.so ==="
+# rust-embed writes each asset's file NAME into a plain table, so the daemon can only serve a KMI
+# whose "<kmi>_kernelsu.ko" string literally occurs in the binary. Check BOTH directions:
+#   - an asset in bin/<abi> whose name is absent from libksud.so = the binary is STALE (assets were
+#     adopted but libksud.so was not rebuilt); the daemon would answer "KMI not supported" and the
+#     device would fall back to no LKM asset at all;
+#   - a KMI named inside libksud.so that bin/<abi> no longer ships = it would fail to load at runtime.
+# Neither is visible to a Gradle build (they are bytes, not sources).
+$binRoot = Join-Path $ws 'userspace\ksud\bin'
+$abiMap = @{ 'aarch64' = 'arm64-v8a'; 'x86_64' = 'x86_64' }
+foreach ($binAbi in @('aarch64', 'x86_64')) {
+    $assetDir = Join-Path $binRoot $binAbi
+    $libPath = Join-Path $jniLibs (Join-Path $abiMap[$binAbi] 'libksud.so')
+    if (-not (Test-Path $assetDir)) { Warn "LKM matrix: bin/$binAbi does not exist" $assetDir; continue }
+    if (-not (Test-Path $libPath)) { Warn "LKM matrix: no libksud.so behind bin/$binAbi" $libPath; continue }
+    $assets = @(Get-ChildItem -Path $assetDir -Filter '*_kernelsu.ko' -File | Sort-Object Name)
+    if ($assets.Count -eq 0) { Warn "LKM matrix: bin/$binAbi ships no kernel module" $assetDir; continue }
+    $libBytes = [System.IO.File]::ReadAllBytes($libPath)
+    $libText = [System.Text.Encoding]::GetEncoding(28591).GetString($libBytes)
+    $missing = @($assets | Where-Object { -not $libText.Contains($_.Name) } | ForEach-Object { $_.Name })
+    Check "libksud.so ($binAbi) embeds every module in bin/$binAbi" ($missing.Count -eq 0) ("assets={0}; missing={1} [{2}]" -f $assets.Count, $missing.Count, ($missing -join ', '))
+    $named = @([regex]::Matches($libText, 'android[0-9]+-[0-9]+\.[0-9]+_kernelsu\.ko') | ForEach-Object { $_.Value } | Sort-Object -Unique)
+    $orphan = @($named | Where-Object { $_ -notin $assets.Name })
+    Check "libksud.so ($binAbi) names no KMI that bin/$binAbi does not ship" ($orphan.Count -eq 0) ("named={0}; orphan={1} [{2}]" -f $named.Count, $orphan.Count, ($orphan -join ', '))
+    if ($missing.Count -gt 0 -or $orphan.Count -gt 0) {
+        Write-Host "       FIX: rebuild it -- cargo clean -p ksud --release, then _tools\build-ksud.ps1"
+    }
+}
+
+Write-Host ""
 Write-Host "=== 3. built APK identity (applicationId, versionCode, signing cert) ==="
 if (-not $Apk) {
     $candidates = @()
@@ -221,39 +251,7 @@ if (Test-Path $signerJson) {
 } else {
     Warn "no _tools/project-signer.json" "cannot read the project cert size: $signerJson"
 }
-function Find-ExpectedSize {
-    param([byte[]]$Bytes, [int]$Want)
-    # The DER-length check compares against a compile-time constant, so its encoding depends on the
-    # architecture of the module. Locate it by instruction shape, never by a fixed offset:
-    #   aarch64: SUBS WZR, W21, #imm -> mask 0xFFC003FF == 0x710002BF, imm = (w >> 10) & 0xFFF
-    #   x86_64 : cmp/mov reg, imm32 -> 3D | 81 /7 | B8+r | C7 /0 (mod=11), imm32 little-endian
-    $res = @{ Ok = $false; Found = '' }
-    if ($Want -le 0) { return $res }
-    $machine = if ($Bytes.Length -gt 20) { [BitConverter]::ToUInt16($Bytes, 18) } else { 0 }
-    if ($machine -eq 183) {
-        for ($i = 0x1000; $i -lt ($Bytes.Length - 4); $i += 4) {
-            $w = [int64][BitConverter]::ToUInt32($Bytes, $i)
-            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
-                $imm = ($w -shr 10) -band 0xFFF
-                if (-not $res.Found) { $res.Found = ('0x{0:X}' -f $imm) }
-                if ($imm -eq $Want) { $res.Ok = $true; return $res }
-            }
-        }
-        return $res
-    }
-    for ($i = 0; $i -lt ($Bytes.Length - 5); $i++) {
-        $b0 = [int]$Bytes[$i]
-        $b1 = [int]$Bytes[$i + 1]
-        $imm = [int64][BitConverter]::ToUInt32($Bytes, $i + 1)
-        $hit = $false
-        if ($b0 -eq 0x3D) { $hit = ($imm -eq $Want) }
-        elseif ($b0 -eq 0x81 -and ($b1 -band 0xF8) -eq 0xF8) { $hit = ($imm -eq $Want) }
-        elseif ($b0 -ge 0xB8 -and $b0 -le 0xBF) { $hit = ($imm -eq $Want) }
-        elseif ($b0 -eq 0xC7 -and ($b1 -band 0xF8) -eq 0xC0) { $hit = ($imm -eq $Want) }
-        if ($hit) { $res.Found = ('0x{0:X}' -f $Want); $res.Ok = $true; return $res }
-    }
-    return $res
-}
+. (Join-Path $PSScriptRoot 'identity-lib.ps1')  # Find-ExpectedSize / Find-LlvmObjdump (shared)
 
 $assetRoot = Join-Path $ws 'userspace\ksud\bin'
 $assets = @()
@@ -267,7 +265,7 @@ if ($assets.Count -eq 0) {
         $bytes = [System.IO.File]::ReadAllBytes($asset.FullName)
         $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
         $nHash = ([regex]::Matches($text, [regex]::Escape($wantHash))).Count
-        $sizeCheck = Find-ExpectedSize -Bytes $bytes -Want $wantSize
+        $sizeCheck = Find-ExpectedSize -Bytes $bytes -Want $wantSize -Path $asset.FullName
         $immOk = $sizeCheck.Ok
         $found = $sizeCheck.Found
         $rel = $asset.FullName.Substring($ws.Length + 1)
@@ -275,7 +273,11 @@ if ($assets.Count -eq 0) {
         Check "LKM asset carries the project cert SHA-256" ($nHash -ge 1) "$rel hash-literal x$nHash (want >= 1)"
         if ($wantSize -gt 0) {
             $arch = if ($bytes.Length -gt 20 -and [BitConverter]::ToUInt16($bytes, 18) -eq 183) { 'aarch64' } else { 'x86_64' }
-            Check "LKM asset expects the project cert DER length" $immOk "$rel [$arch] expected-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
+            if ($null -eq $immOk) {
+                Warn "LKM asset DER-length check unavailable" "$rel [$arch] $found"
+            } else {
+                Check "LKM asset expects the project cert DER length" $immOk "$rel [$arch] expected-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
+            }
         }
         # PROVENANCE: -DKSU_MANAGER_PACKAGE compiles the manager package name into is_manager_apk().
         # A byte-patched asset rewrites the cert hash and the DER-length immediate only, so the

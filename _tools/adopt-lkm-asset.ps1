@@ -46,39 +46,7 @@ function Check { param([string]$Name, [bool]$Ok, [string]$Detail)
     Write-Host ('[{0}] {1}' -f $tag, $Name)
     if ($Detail) { Write-Host ('       {0}' -f $Detail) }
 }
-function Find-ExpectedSize {
-    param([byte[]]$Bytes, [int]$Want)
-    # The DER-length check compares against a compile-time constant, so its encoding depends on the
-    # architecture of the module. Locate it by instruction shape, never by a fixed offset:
-    #   aarch64: SUBS WZR, W21, #imm -> mask 0xFFC003FF == 0x710002BF, imm = (w >> 10) & 0xFFF
-    #   x86_64 : cmp/mov reg, imm32 -> 3D | 81 /7 | B8+r | C7 /0 (mod=11), imm32 little-endian
-    $res = @{ Ok = $false; Found = '' }
-    if ($Want -le 0) { return $res }
-    $machine = if ($Bytes.Length -gt 20) { [BitConverter]::ToUInt16($Bytes, 18) } else { 0 }
-    if ($machine -eq 183) {
-        for ($i = 0x1000; $i -lt ($Bytes.Length - 4); $i += 4) {
-            $w = [int64][BitConverter]::ToUInt32($Bytes, $i)
-            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
-                $imm = ($w -shr 10) -band 0xFFF
-                if (-not $res.Found) { $res.Found = ('0x{0:X}' -f $imm) }
-                if ($imm -eq $Want) { $res.Ok = $true; return $res }
-            }
-        }
-        return $res
-    }
-    for ($i = 0; $i -lt ($Bytes.Length - 5); $i++) {
-        $b0 = [int]$Bytes[$i]
-        $b1 = [int]$Bytes[$i + 1]
-        $imm = [int64][BitConverter]::ToUInt32($Bytes, $i + 1)
-        $hit = $false
-        if ($b0 -eq 0x3D) { $hit = ($imm -eq $Want) }
-        elseif ($b0 -eq 0x81 -and ($b1 -band 0xF8) -eq 0xF8) { $hit = ($imm -eq $Want) }
-        elseif ($b0 -ge 0xB8 -and $b0 -le 0xBF) { $hit = ($imm -eq $Want) }
-        elseif ($b0 -eq 0xC7 -and ($b1 -band 0xF8) -eq 0xC0) { $hit = ($imm -eq $Want) }
-        if ($hit) { $res.Found = ('0x{0:X}' -f $Want); $res.Ok = $true; return $res }
-    }
-    return $res
-}
+. (Join-Path $PSScriptRoot 'identity-lib.ps1')  # Find-ExpectedSize / Find-LlvmObjdump (shared)
 
 function Warn2 { param([string]$Name, [string]$Detail)
     Write-Host ('[WARN] {0}' -f $Name)
@@ -124,8 +92,12 @@ Check 'candidate does NOT whitelist the official cert' ($nOfficial -eq 0) ('offi
 Check 'candidate does NOT whitelist the public debug cert' ($nDebug -eq 0) ('debug literal x{0} (want 0)' -f $nDebug)
 
 # 3. DER length, located by instruction shape for the candidate's own architecture (see the helper).
-$size = Find-ExpectedSize -Bytes $bytes -Want $wantSize
-Check 'candidate expects the project cert DER length' $size.Ok ('{0} cmp-size imm={1} (want {2} = 0x{3:X})' -f $Abi, $size.Found, $wantSize, $wantSize)
+$size = Find-ExpectedSize -Bytes $bytes -Want $wantSize -Path $Ko
+if ($null -eq $size.Ok) {
+    Warn2 'candidate DER-length check unavailable' ('{0} {1} -- install the NDK llvm-objdump to disassemble x86_64 code' -f $Abi, $size.Found)
+} else {
+    Check 'candidate expects the project cert DER length' $size.Ok ('{0} cmp-size imm={1} (want {2} = 0x{3:X}) [{4}]' -f $Abi, $size.Found, $wantSize, $wantSize, $size.Why)
+}
 
 # 4. Which path produced it: only a from-source build carries the package-name check.
 $nPkg = ([regex]::Matches($text, [regex]::Escape($ExpectedPackage))).Count

@@ -18,12 +18,13 @@
 | `build-manager.ps1` | 设置 `JAVA_HOME` / `ANDROID_HOME` / `ANDROID_USER_HOME` / `GRADLE_USER_HOME` / `TEMP` 后调用 Gradle；用法 `-Task ':app:assembleRelease' -NoDaemon`，结束打印 `EXITCODE=` |
 | `build-ksud.ps1` | 用 cargo-ndk 构建 ksud / ksuinit；`-PackageName` 必须等于 `manager/gradle.properties` 的 `KSU_PACKAGE_NAME`；`-Platform` 需 API 26+（默认 31）；`-Fmt` / `-Clippy` / `-Check` 只跑静态检查并以其退出码结束 |
 | `sync-hiding-pack.ps1` | 把资源包同步进 `assets/hiding` 并重新生成 `manifest.json`；`-SourcePack` 必填，`-IncludeDetectors` 默认关闭、`-IncludeKeybox` 永不启用、`-IncludeData` 默认 false |
-| `verify-identity.ps1` | 校验四件事：`manager/gradle.properties` 的包名、预编译 `libksud.so` 内嵌包名、APK 的 applicationId 与签名证书、内置 LKM 资产的证书哈希与 DER 长度；第 4 项还报出资产产地（路径 A ＝ 编译进了 `KSU_MANAGER_PACKAGE`，路径 B ＝ 只换了证书常量），`-RequireSourceBuild` 把路径 B 直接判失败；`-SelfTest` 会跑正反例自检 |
+| `verify-identity.ps1` | 校验四件事：`manager/gradle.properties` 的包名、预编译 `libksud.so` 内嵌包名、APK 的 applicationId 与签名证书、内置 LKM 资产的证书哈希与 DER 长度；第 4 项覆盖 `userspace\ksud\bin\**\*_kernelsu.ko` 的每一个 KMI/ABI，并报出资产产地（路径 A ＝ 编译进了 `KSU_MANAGER_PACKAGE`，路径 B ＝ 只换了证书常量），`-RequireSourceBuild` 把路径 B 直接判失败；`-SelfTest` 会跑正反例自检；第 2b 节还逐个核对资产名是否真的编进了对应的 `libksud.so`（资产已收编但二进制未重建即硬失败） |
 | `measure-ui-dump.ps1` | 把 uiautomator dump 的 XML 换算成 px/dp 尺寸表 |
 | `diff-tree.ps1` | 对比两棵目录树的差异 |
-| `patch-init-boot.py` | 对引导镜像或裸 ko 做常量替换 / 资产替换（`--base/--out` 或 `--ko-in/--ko-out`），可顺带 `--manager-appid` 预置冠位；`--replace-ko` 允许 ko 大小变化，此时会重排整个 newc 归档（成员大小一变，后面每个 entry 都会移位，原地覆盖会破坏归档）；写出后自查 cpio 往返与成员顺序，`--dry-run` 只报告不改动 |
-| `verify-init-boot.py` | 独立复核引导镜像（不共用 producer 的解析代码：自带 boot 头解析、LZ4-legacy 解码、newc 遍历、ELF `.symtab` 查找）：ko 是否 ELF64 aarch64、项目证书哈希是否恰好一处、官方与 debug 哈希是否都已消失、`cmp w21,#imm` 是否等于项目证书 DER 长度、产地是路径 A 还是 B、`--expect-appid` 冠位预置；`--require-source-build` 时路径 B 直接失败，`--dump-ko` 导出内置 ko |
-| `adopt-lkm-asset.ps1` | 把 CI 从源码构建出来的 ko 收编为内置资产：先证明它是项目身份（证书哈希 / DER 长度 / 无官方与 debug 哈希），再报出它是否带 `KSU_MANAGER_PACKAGE` 包名校验（路径 A 有、路径 B 没有）；`-DryRun` 只校验，`-AllowPatchedAsset` 才接受路径 B |
+| `patch-init-boot.py` | 对引导镜像或裸 ko 做常量替换 / 资产替换（`--base/--out` 或 `--ko-in/--ko-out`），可顺带 `--manager-appid` 预置冠位；`--signer-size` 会按 `--from-size`（当前编进去的 DER 长度，默认 827）唯一命中比较指令并保留其寄存器编码（aarch64 的 `cmp w8/w21,#imm` 由编译器决定），`--replace-ko` 允许 ko 大小变化，此时会重排整个 newc 归档（成员大小一变，后面每个 entry 都会移位，原地覆盖会破坏归档）；写出后自查 cpio 往返与成员顺序，`--dry-run` 只报告不改动 |
+| `verify-init-boot.py` | 独立复核引导镜像（不共用 producer 的解析代码：自带 boot 头解析、LZ4-legacy 解码、newc 遍历、ELF `.symtab` 查找）：ko 是否 ELF64 aarch64、项目证书哈希是否恰好一处、官方与 debug 哈希是否都已消失、`cmp w<n>,#imm` 是否等于项目证书 DER 长度、产地是路径 A 还是 B、`--expect-appid` 冠位预置；`--require-source-build` 时路径 B 直接失败，`--dump-ko` 导出内置 ko |
+| `adopt-lkm-asset.ps1` | 把 CI 从源码构建出来的 ko 收编为内置资产：先证明它是项目身份（证书哈希 / DER 长度 / 无官方与 debug 哈希），再报出它是否带 `KSU_MANAGER_PACKAGE` 包名校验（路径 A 有、路径 B 没有）；`-Abi {aarch64\|x86_64}`（默认 aarch64）与 `-Kmi <kmi>` 决定落点 `userspace\ksud\bin\<abi>\<kmi>_kernelsu.ko`；`-DryRun` 只校验，`-AllowPatchedAsset` 才接受路径 B |
+| `identity-lib.ps1` | 身份判据的共享实现（被 `adopt-lkm-asset.ps1` / `verify-identity.ps1` / `build-ksud.ps1` 点源加载）：`Find-LlvmObjdump` 找 NDK 的 objdump，`Find-ExpectedSize` 证明 ko 里的 DER 长度比较等于期望值——aarch64 按 `(w & 0x7F80001F) == 0x7100001F` 收集全部 wzr 比较（寄存器是编译器选择：多数 KMI 是 `w21`，android12-5.10 是 `w8`），x86_64 走反汇编匹配 `cmp $834`；工具缺失时返回 `Ok=$null` 让调用方报警告而不是猜 |
 | `project-signer.json` | 项目签名身份的公开事实（证书 SHA-256、DER 长度等）；私钥与口令在 `.artifacts/builder/keystore/keystore.properties`，不入库 |
 | `hiding_manifest.schema.json` | 资源包 manifest 的契约（结构与管理器侧消费语义） |
 

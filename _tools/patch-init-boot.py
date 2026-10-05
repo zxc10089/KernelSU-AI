@@ -62,11 +62,10 @@ import sys
 
 BOOT_MAGIC = b"ANDROID!"
 LZ4_LEGACY_MAGIC = bytes.fromhex("02214c18")
-# aarch64: cmp w21, #imm  (0x7100001f | imm12<<10 | rn<<5 | rd) -- the two
-# constants used by check_v2_signature() size checks in apk_sign.c
-CMP_PATTERN = bytes.fromhex("bfee0c71")  # cmp w21, #0x33b (827)
-CMP_REPLACE = bytes.fromhex("bfa20b71")  # cmp w21, #0x2e8 (744)
-CMP_OFF_DEFAULT = 0xA864
+# aarch64: cmp w<n>, #imm  (0x7100001f | imm12<<10 | rn<<5 | 31) -- the DER length that
+# check_block() compares in apk_sign.c. It is located by instruction SHAPE at patch time
+# (see patch_signer): the register is a compiler choice (w21 in most KMIs, w8 in
+# android12-5.10), so the old byte-exact anchors (bfee0c71 / 0xA864) are gone.
 HASH_OFF_DEFAULT = 0x1B92A
 
 
@@ -252,8 +251,8 @@ def patch_manager_appid(ko: bytearray, appid: int) -> bool:
     return True
 
 
-def patch_signer(ko: bytearray, sha256hex, size) -> bool:
-    """Patch the built-in v2 signer cert expectation (64-hex literal + cmp w21,#imm size)."""
+def patch_signer(ko: bytearray, sha256hex, size, from_size=0x33B) -> bool:
+    """Patch the built-in v2 signer cert expectation (64-hex literal + cmp w<n>,#imm size)."""
     import re
     h = sha256hex
     if h:
@@ -272,28 +271,31 @@ def patch_signer(ko: bytearray, sha256hex, size) -> bool:
                 len(hits), [(hex(i), v[:8]) for i, v in zip(hits, old)]))
             return False
     if size is not None:
-        # cmp w21, #imm  ==  SUBS WZR, W21, #imm  => Rd = 31 (WZR); sh=0
-        SHAPE = 0x71000000 | (21 << 5) | 31
-        POS_MASK = ~(0xFFF << 10) & 0xFFFFFFFF
-        pos = bytes(ko).find(CMP_PATTERN)
-        if pos < 0:
-            pos = CMP_OFF_DEFAULT
-            word = struct.unpack_from("<I", ko, pos)[0]
-            if word & POS_MASK != SHAPE:
-                print("FATAL: no 'cmp w21, #imm' at the documented offset 0x%x: %s" % (pos, bytes(ko)[pos:pos + 4].hex()))
-                return False
-        if pos >= 0:
-            if not (0 < size < 4096):
-                print("FATAL: --signer-size %d out of range (12-bit immediate)" % size)
-                return False
-            cur_imm = (struct.unpack_from("<I", ko, pos)[0] >> 10) & 0xFFF
-            if cur_imm == size:
-                print("signer-size : already cmp w21,#%d at 0x%x (no change)" % (size, pos))
-            else:
-                enc = struct.pack("<I", 0x71000000 | (size << 10) | (21 << 5) | 31)
-                print("signer-size : cmp w21,#0x%x at file offset 0x%x: %s -> %s" % (
-                    size, pos, bytes(ko)[pos:pos + 4].hex(), enc.hex()))
-                ko[pos:pos + 4] = enc
+        # cmp w<n>, #imm  ==  SUBS WZR, W<n>, #imm  => Rd = 31 (WZR), sf = 0. Rn is a compiler
+        # choice, so the anchor is the size CURRENTLY compiled in (from_size), which must occur
+        # exactly once as a wzr-compare immediate.
+        if not (0 < size < 4096):
+            print("FATAL: --signer-size %d out of range (12-bit immediate)" % size)
+            return False
+        words = []
+        for off in range(0x1000, len(ko) - 4, 4):
+            word = struct.unpack_from("<I", ko, off)[0]
+            if (word & 0x7F80001F) == 0x7100001F:
+                words.append((off, (word >> 10) & 0xFFF, word))
+        hits = [(off, imm, word) for off, imm, word in words if imm == from_size]
+        if len(hits) != 1:
+            print("FATAL: expected exactly one 'cmp w<n>,#0x%x' (SUBS WZR,W<n>,#imm) in the ko, found %d: %s" % (
+                from_size, len(hits), [(hex(o), hex(i)) for o, i, _ in hits]))
+            print("       wzr-compare immediates present: %s" % (sorted({i for _, i, _ in words}),))
+            return False
+        pos, cur_imm, word = hits[0]
+        if cur_imm == size:
+            print("signer-size : already cmp w%d,#%d at 0x%x (no change)" % ((word >> 5) & 0x1F, size, pos))
+        else:
+            enc = struct.pack("<I", (word & ~(0xFFF << 10)) | (size << 10))
+            print("signer-size : cmp w%d,#0x%x at file offset 0x%x: %s -> %s" % (
+                (word >> 5) & 0x1F, size, pos, bytes(ko)[pos:pos + 4].hex(), enc.hex()))
+            ko[pos:pos + 4] = enc
     return True
 
 
@@ -309,7 +311,7 @@ def patch_ko_only(args) -> int:
     print("ko-input    : %s (%d bytes, sha256 %s)" % (args.ko_in, len(data), hashlib.sha256(before).hexdigest()))
     if args.manager_appid is not None and not patch_manager_appid(data, args.manager_appid):
         return 2
-    if (args.signer_sha256 or args.signer_size is not None) and not patch_signer(data, args.signer_sha256, args.signer_size):
+    if (args.signer_sha256 or args.signer_size is not None) and not patch_signer(data, args.signer_sha256, args.signer_size, args.from_size):
         return 2
     diff = [i for i in range(len(before)) if before[i] != data[i]]
     print("ko diff     : %d byte(s) %s" % (len(diff), [hex(i) for i in diff[:16]]))
@@ -331,7 +333,9 @@ def main():
     ap.add_argument("--manager-appid", type=int, default=None,
                     help="uid of the manager app (uid %% 100000), e.g. 10626 for me.weishu.kernelsu.hide")
     ap.add_argument("--signer-sha256", default=None, help="64 hex chars: sha256 of the manager APK v2 signer cert DER")
-    ap.add_argument("--signer-size", type=int, default=None, help="DER length of that cert (e.g. 744)")
+    ap.add_argument("--signer-size", type=int, default=None, help="DER length of that cert (e.g. 834)")
+    ap.add_argument("--from-size", type=int, default=0x33B,
+                    help="DER length currently compiled into the ko (default 827 = the official cert)")
     ap.add_argument("--ko-name", default="kernelsu.ko", help="cpio member name of the kernel module")
     ap.add_argument("--replace-ko", default=None, help="replace the ko in the ramdisk with this file")
     ap.add_argument("--dump-ko", default=None, help="write the (pre-patch) ko out for inspection")
@@ -382,7 +386,7 @@ def main():
         return 2
 
     if args.signer_sha256 or args.signer_size is not None:
-        if not patch_signer(ko, args.signer_sha256, args.signer_size):
+        if not patch_signer(ko, args.signer_sha256, args.signer_size, args.from_size):
             return 2
     if size_changed:
         new_cpio = rebuild_cpio(cpio, members, ko_mem, bytes(ko))

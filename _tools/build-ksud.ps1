@@ -223,6 +223,7 @@ Write-Host "workspace=$ws\Cargo.toml"
 #   make KSU_EXPECTED_SIZE=... KSU_EXPECTED_HASH=... KSU_MANAGER_PACKAGE=... # explicit override
 # The byte patch above is the fallback for machines without a DDK container (this one).
 $signerJson = Join-Path $ws '_tools\project-signer.json'
+. (Join-Path $PSScriptRoot 'identity-lib.ps1')  # Find-ExpectedSize / Find-LlvmObjdump (shared)
 $assetRoot  = Join-Path $ws 'userspace\ksud\bin'
 if (Test-Path $signerJson) {
     $signer   = Get-Content -LiteralPath $signerJson -Raw | ConvertFrom-Json
@@ -239,19 +240,16 @@ if (Test-Path $signerJson) {
         $bytes = [System.IO.File]::ReadAllBytes($asset.FullName)
         $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
         $nHash = ([regex]::Matches($text, [regex]::Escape($wantHash))).Count
-        $immOk = $false
-        $found = ''
-        for ($i = 0x1000; $i -lt ($bytes.Length - 4); $i += 4) {
-            $w = [int64][BitConverter]::ToUInt32($bytes, $i)
-            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
-                $imm = ($w -shr 10) -band 0xFFF
-                if (-not $found) { $found = ('0x{0:X}' -f $imm) }
-                if ($imm -eq $wantSize) { $immOk = $true; break }
-            }
-        }
+        $sizeCheck = Find-ExpectedSize -Bytes $bytes -Want $wantSize -Path $asset.FullName
+        $immOk = $sizeCheck.Ok
+        $found = $sizeCheck.Found
         if ($NoVerify) {
             Write-Host "LKM asset  : $($asset.Name) VERIFY SKIPPED (-NoVerify)"
-        } elseif ($nHash -lt 1 -or -not $immOk) {
+        } elseif ($nHash -lt 1) {
+            throw ("LKM asset {0} does not carry the project signer identity (cert-hash x{1}, want {2}). Patch it first: powershell -NoProfile -ExecutionPolicy Bypass -File _tools\patch-init-boot.py --ko-in <asset> --ko-out <asset> --signer-sha256 {2} --signer-size {3}" -f $asset.FullName, $nHash, $wantHash, $wantSize)
+        } elseif ($null -eq $immOk) {
+            Write-Host ("LKM asset  : {0} cert OK, DER-length UNVERIFIED ({1})" -f $asset.Name, $found)
+        } elseif (-not $immOk) {
             throw ("LKM asset {0} does not carry the project signer identity (cert-hash x{1}, cmp-size {2}, want {3} = 0x{4:X}). Patch it first: powershell -NoProfile -ExecutionPolicy Bypass -File _tools\patch-init-boot.py --ko-in <asset> --ko-out <asset> --signer-sha256 {5} --signer-size {3}" -f $asset.FullName, $nHash, $found, $wantSize, $wantSize, $wantHash)
         } else {
             Write-Host ("LKM asset  : {0} OK (cert {1}, cmp-size {2})" -f $asset.Name, $wantHash, $found)

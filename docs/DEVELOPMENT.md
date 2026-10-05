@@ -91,8 +91,8 @@
 - `userspace/ksud/src/late_load.rs` 在 LKM 模式下以 `format!("{kmi}_kernelsu.ko")` 取资产并加载；KMI 缺省时向 `boot_patch::get_current_kmi()` 询问。
 - `userspace/ksud/src/boot_patch.rs` 在给 GKI 镜像打补丁时同样按 `{kmi}_kernelsu.ko` 取 ko，并取 `ksuinit` 作为 init 载荷，最终把两者写进 cpio。
 
-当前内置的 ko 是路径 A（从源码构建）的产物：`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`（315280 字节，sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`），其中项目证书哈希 `ca40af…3eec` 位于文件偏移 112938（`0x1b92a`）、`cmp w21,#0x342` 位于 43108（`0xa864`），官方哈希 `c371061b…` 与 debug 证书哈希 `f9af24bd…` 在整个文件中都不存在。`_tools/build-ksud.ps1` 在打包资产前会跑资产闸门，`_tools/verify-identity.ps1` 第 4 节复核同一对特征，不匹配即失败——这两条就是「内置资产是否已换成我方版本」的判据（也是「刷了镜像仍拿不到 root」这类故障的根因闸门）。该资产已含编译期包名 `me.weishu.kernelsu.hide`（`is_manager_apk()` 会先比包名再验证书，见 `kernel/manager/apk_sign.c`）。它的来源是上游 DDK CI：`.github/workflows/build-lkm-fork.yml`（`push` 到 `master`/`ci-lkm-identity` 或手动触发）调用上游 `ddk-lkm.yml`，产物由 `publish` 作业落到 `ci/lkm` 分支的 `ci-artifacts/aarch64/android15-6.6_kernelsu.ko`，再由 `_tools/adopt-lkm-asset.ps1` 收编；同一 KMI 的官方预编译产物与它 vermagic 逐字相同（`6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64`）。没有 DDK 的机器用路径 B 等长字节替换，只能改证书哈希与 DER 长度，包名校验仍缺失——`_tools/verify-identity.ps1` 第 4 节会把产地单独打印出来（`provenance=path A/path B`），加 `-RequireSourceBuild` 时路径 B 直接判失败。
-- 该 ko 与 `ksuinit` 随仓库分发（`userspace/ksud/bin/aarch64/`）：上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 注入的产物，本分支为了让没有工具链的源码快照也能直接出包，对这两个文件加了放行规则。上游 CI 已恢复（`.github/workflows/` 与上游逐字节一致，见 `docs/upstream-alignment.md`），因此同一路径的资产也可以直接由 `build-lkm.yml` 构建后取回。`userspace/ksud/bin/x86_64/` 有 `busybox` 与按上游 ksuinit.yml 的静态链接 recipe 本机构建的 `ksuinit`（无动态依赖）；x86_64 的 `_kernelsu.ko` 由上游 `ddk-lkm.yml` 在 Android DDK 容器里生成，本机没有该容器，因此该架构的 LKM 模式缺少内置资产。
+当前内置的 ko **全部**是路径 A（从源码构建）的产物：上游 8 个 KMI × 2 个 ABI 共 16 个文件（逐项字节数与 sha256 见 `docs/upstream-alignment.md` 第 7 节），例如 `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`（315280 字节，sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`），其中项目证书哈希 `ca40af…3eec` 位于文件偏移 112938（`0x1b92a`），官方哈希 `c371061b…` 与 debug 证书哈希 `f9af24bd…` 在整个文件中都不存在。DER 长度的比较指令位置与寄存器由编译器决定（aarch64 多数 KMI 是 `cmp w21,#0x342`，android12-5.10 编成 `cmp w8,#0x342`；x86_64 是 `cmpl $834,…`），因此判据不再写死偏移，而由 `_tools/identity-lib.ps1` 的 `Find-ExpectedSize` 按指令形状定位：aarch64 收集全部 `(w & 0x7F80001F) == 0x7100001F` 的 wzr 比较再比对长度（寄存器是编译器选择，适配 w8/w21 两种编码），x86_64 走 llvm-objdump 反汇编匹配 `cmp $834`（缺 objdump 时返回 `Ok=$null`，调用方报警告而不猜）。`_tools/build-ksud.ps1` 在打包资产前会跑资产闸门，`_tools/verify-identity.ps1` 第 4 节复核同一对特征，不匹配即失败——这两条就是「内置资产是否已换成我方版本」的判据（也是「刷了镜像仍拿不到 root」这类故障的根因闸门）。该资产已含编译期包名 `me.weishu.kernelsu.hide`（`is_manager_apk()` 会先比包名再验证书，见 `kernel/manager/apk_sign.c`）。它的来源是上游 DDK CI：`.github/workflows/build-lkm-fork.yml`（`push` 到 `master`/`ci-lkm-identity` 或手动触发）调用上游 `ddk-lkm.yml`，产物由 `publish` 作业落到 `ci/lkm` 分支的 `ci-artifacts/aarch64/android15-6.6_kernelsu.ko`，再由 `_tools/adopt-lkm-asset.ps1` 收编；同一 KMI 的官方预编译产物与它 vermagic 逐字相同（`6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64`）。没有 DDK 的机器用路径 B 等长字节替换，只能改证书哈希与 DER 长度，包名校验仍缺失——`_tools/verify-identity.ps1` 第 4 节会把产地单独打印出来（`provenance=path A/path B`），加 `-RequireSourceBuild` 时路径 B 直接判失败。
+- 该 ko 与 `ksuinit` 随仓库分发（`userspace/ksud/bin/aarch64/`）：上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 注入的产物，本分支为了让没有工具链的源码快照也能直接出包，对这两个文件加了放行规则。上游 CI 已恢复（`.github/workflows/` 与上游逐字节一致，见 `docs/upstream-alignment.md`），因此同一路径的资产也可以直接由 `build-lkm.yml` 构建后取回。`userspace/ksud/bin/x86_64/` 有 `busybox` 与按上游 ksuinit.yml 的静态链接 recipe 本机构建的 `ksuinit`（无动态依赖）；x86_64 的 8 个 `_kernelsu.ko` 与 aarch64 的 8 个一样，由 DDK CI（`.github/workflows/build-lkm-fork.yml` → 上游 `build-lkm.yml` 的 8-KMI 矩阵，run `37312303026`）从源码构建后随仓库分发——本机没有 DDK 容器，从源码构建只能借 CI。
 
 后果：只要刷入或加载这个 ko，管理器身份即为本分支；换 keystore 或换 KMI 都需要重新补丁并重新内置。
 
@@ -444,7 +444,7 @@ val runtimeMode = when {
 
 ### 7.2 风险
 
-- 身份机制脆弱：强绑单一 keystore、单一 KMI（当前只内置 android15-6.6）、强绑单一 slot（只有 `_a` 打了补丁）、必须保持 v2-only 签名、证书 DER 长度必须精确匹配。内置 ko 已于 2026-10-05 改为 DDK CI 的源码构建产物（含包名校验），字节补丁只作为无 DDK 机器的回退；剩余的是其余 7 个 KMI 尚未收编（可选加固，见 `docs/upstream-alignment.md` 第 7 节）。
+- 身份机制脆弱：强绑单一 keystore、强绑单一 slot（只有 `_a` 打了补丁）、必须保持 v2-only 签名、证书 DER 长度必须精确匹配。内置 ko 已于 2026-10-05 改为 DDK CI 的源码构建产物（含包名校验），并在同日补齐上游 8 个 KMI × 2 个 ABI 的全矩阵（run `37312303026`，逐项哈希见 `docs/upstream-alignment.md` 第 7 节），字节补丁只作为无 DDK 机器的回退；原先「只内置 android15-6.6」这一条随之关闭。
 - 回滚源只有引导分区镜像备份，且备份位于设备内的 `/data/local/tmp`：清空数据分区或格式化即丢失，更底层的恢复能力未验证。建议尽快把镜像复制到设备外保存。
 - 救砖模块的实际效果未在设备上验证，目前只有模块自身开机脚本的自检提示。
 - 内置资源包含第三方模块与商用闭源应用，再分发许可需要逐个确认；keybox 不随包分发。
@@ -468,7 +468,7 @@ cargo fmt
 
 1. 先准备 `manager/app/src/main/jniLibs/arm64-v8a/libksud.so`。
 2. `_tools/build-manager.ps1 -Task :app:assembleRelease`。
-3. 若需核对身份：`_tools/verify-identity.ps1 -Apk <apk>`；加 `-SelfTest` 可先验证检查自身既能失败也能通过，加 `-RequireSourceBuild` 则要求内置 LKM 资产必须源自源码构建（缺 `KSU_MANAGER_PACKAGE` 包名即失败）。第 4 节核对证书哈希 + DER 长度，并报出产地 `provenance=path A/path B`——2026-10-05 那次「刷了镜像也拿不到 root」的故障就出在这一项上。
+3. 若需核对身份：`_tools/verify-identity.ps1 -Apk <apk>`；加 `-SelfTest` 可先验证检查自身既能失败也能通过，加 `-RequireSourceBuild` 则要求内置 LKM 资产必须源自源码构建（缺 `KSU_MANAGER_PACKAGE` 包名即失败）。第 2b 节逐个核对资产名是否真的编进了对应的 `libksud.so`（收编了资产却没重建二进制即硬失败），第 4 节对 `userspace/ksud/bin/**/*_kernelsu.ko` 的**每一个** KMI/ABI（当前 16 个）核对证书哈希 + DER 长度，并报出产地 `provenance=path A/path B`——2026-10-05 那次「刷了镜像也拿不到 root」的故障就出在这一项上。
 4. 引导镜像另用独立复核：`_tools/verify-init-boot.py <img> --expect-appid <uid%100000> --require-source-build`（自带 boot 头解析 / LZ4 解码 / newc 遍历，不共用 producer 代码），核对 ko 身份、产地与冠位预置；对旧镜像同参数应当失败，用于确认判据本身有效。
 
 **资源包**
