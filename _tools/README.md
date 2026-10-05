@@ -18,9 +18,12 @@
 | `build-manager.ps1` | 设置 `JAVA_HOME` / `ANDROID_HOME` / `ANDROID_USER_HOME` / `GRADLE_USER_HOME` / `TEMP` 后调用 Gradle；用法 `-Task ':app:assembleRelease' -NoDaemon`，结束打印 `EXITCODE=` |
 | `build-ksud.ps1` | 用 cargo-ndk 构建 ksud / ksuinit；`-PackageName` 必须等于 `manager/gradle.properties` 的 `KSU_PACKAGE_NAME`；`-Platform` 需 API 26+（默认 31）；`-Fmt` / `-Clippy` / `-Check` 只跑静态检查并以其退出码结束 |
 | `sync-hiding-pack.ps1` | 把资源包同步进 `assets/hiding` 并重新生成 `manifest.json`；`-SourcePack` 必填，`-IncludeDetectors` 默认关闭、`-IncludeKeybox` 永不启用、`-IncludeData` 默认 false |
-| `verify-identity.ps1` | 校验包名 / 版本 / 证书指纹 / 预编译 `libksud.so` 内嵌包名 / 资源包一致性；`-SelfTest` 会跑正反例自检 |
+| `verify-identity.ps1` | 校验四件事：`manager/gradle.properties` 的包名、预编译 `libksud.so` 内嵌包名、APK 的 applicationId 与签名证书、内置 LKM 资产的证书哈希与 DER 长度；`-SelfTest` 会跑正反例自检 |
 | `measure-ui-dump.ps1` | 把 uiautomator dump 的 XML 换算成 px/dp 尺寸表 |
 | `diff-tree.ps1` | 对比两棵目录树的差异 |
+| `patch-init-boot.py` | 路径 B：对引导镜像或裸 ko 做等长常量替换（`--base/--out` 或 `--ko-in/--ko-out`），可顺带 `--manager-appid` 预置冠位；`--dry-run` 只报告不改动 |
+| `adopt-lkm-asset.ps1` | 把 CI 从源码构建出来的 ko 收编为内置资产：先证明它是项目身份（证书哈希 / DER 长度 / 无官方与 debug 哈希），再报出它是否带 `KSU_MANAGER_PACKAGE` 包名校验（路径 A 有、路径 B 没有）；`-DryRun` 只校验，`-AllowPatchedAsset` 才接受路径 B |
+| `project-signer.json` | 项目签名身份的公开事实（证书 SHA-256、DER 长度等）；私钥与口令在 `.artifacts/builder/keystore/keystore.properties`，不入库 |
 | `hiding_manifest.schema.json` | 资源包 manifest 的契约（结构与管理器侧消费语义） |
 
 ## 红线

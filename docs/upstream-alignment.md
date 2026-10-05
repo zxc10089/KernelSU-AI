@@ -42,6 +42,27 @@
 2. `.github/workflows/build-lkm-fork.yml` 只构建 `android15-6.6` 一个 KMI，并把产物提交到 `ci/lkm` 分支，便于没有 Actions 权限的客户端取回。
 3. 身份不需要任何参数：`kernel/Kbuild` 的默认值就是项目身份（见下节），上游工作流里的 `make` 直接产出正确身份。
 
+取回与收编（本机没有可写 GitHub 凭证时，前两步需要在能推送的环境执行）：
+
+```bash
+# 触发：推送 master（含 kernel/** 变更）会自动跑 build-lkm-fork.yml；
+# 或在 Actions -> Build fork LKM (android15-6.6) -> Run workflow 手动触发
+git push origin master
+
+# 产物：Actions 页可下载 aarch64-android15-6.6-lkm；publish 任务同时把它提交到 ci/lkm
+git fetch origin ci/lkm
+git show ci/lkm:ci-artifacts/aarch64/android15-6.6_kernelsu.ko > /tmp/built.ko
+```
+
+```powershell
+# 收编（先校验身份，再写进资产树；默认拒绝路径 B 的字节补丁产物）
+powershell -NoProfile -ExecutionPolicy Bypass -File _tools\adopt-lkm-asset.ps1 -Ko <built.ko> -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File _tools\adopt-lkm-asset.ps1 -Ko <built.ko> -Verify
+# 之后按提示重建 libksud.so 与管理器 APK，并重新打引导镜像
+```
+
+`adopt-lkm-asset.ps1` 会报出候选模块是路径 A（含编译进去的包名校验）还是路径 B（只有证书匹配），因此「资产是否与源码一致」从一句描述变成了可执行的判据。
+
 ## 6. `kernel/Kbuild` 的身份默认值（本次新增）
 
 ```make
