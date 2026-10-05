@@ -112,14 +112,17 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 - **AI 控制台**：主页入口、模型与参数配置、访问范围、确认弹窗、附件与图片理解、计划模式已在 Android 16 真机上走通；其中图片理解用一张内容已知的测试图做了端到端核对，回复与图上文字、形状、配色一致。仓库不保留设备级截图与哈希留档。
 - **构建与身份**：`_tools/build-manager.ps1` 出包与管理器身份核对（包名 / 版本 / 证书）在本分支上执行过。
-- **环境隐藏**：安装链路与 HMA-OSS 配置同步已在真机执行过（含一次重启后复核）；**核心隐藏效果的验收用例尚未执行**，见「已知缺口」。
+- **环境隐藏**：安装链路与 HMA-OSS 配置同步已在真机执行过（含一次重启后复核）。
+- **对抗性验收（真机实测）**：9 个内置检测器已在 OPPO PMA110（Android 16 / sdk 36）上逐个跑完，环境为 LKM 模式 + Hybrid Mount / Zygisk Next / LSPosed / AlwaysStrong / HMA-OSS / PathMask。核心隐藏效果成立：没有 Su、Magisk、模块文件与 Syscall/Libc 类命中，密钥认证显示**引导加载程序已锁定**、可信执行环境正常。同时暴露出仍可被观测的面：Hunter 判定自身进程「已经被 Hook&修改」，春秋判定 `System compromised`，ruru 把 PM 常规Api查询、无障碍服务、设置属性标为「可疑」，momo 只报「已开启调试模式」，应用列表检测器头部标记 abnormal environment。逐条记录见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 9 节。
+- **「重启」按钮**：已在真机复现并定位，点击后 `/proc/uptime` 归零，确为真实重启；结论与可复现的「无响应」路径见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 9 节。
 - **静态检查**：ksud 的 clippy 闸门通过；对上游遗留的两条 pedantic 告警在 crate 级 `allow` 中注明来源后放行，收口说明见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 3.5 节。
 - **未验证即不写入**：本文件与 `docs/` 中无法在仓库内核对的内容会标注「待验证」，或从文档中删除。
 
 ## 已知缺口
 
-- 环境隐藏的**对抗性验收尚未执行**：9 个检测器 APK 没有实跑过隐藏结果（历史上编号为 B1–B13 的用例在仓库内没有定义）。
-- 「重启」按钮 3 次点击中有 2 次无响应，原因未定位。
+- 对抗性验收有两个检测器未取得有效判定：Luna 停在「等待授权」后报 `Get Luna Version error`（其授权服务不可达，设备联网与 INTERNET 权限均正常）；春秋检测启动即弹出不可关闭的「发现新版本」对话框（无取消/关闭，返回键与点击遮罩均无效），其异常清单未能逐条展开。MT 管理器为人工比对工具，本身没有自动判定。
+- 环境隐藏页「重启」按钮在 late-load 模式下会丢弃软重启偏好：确认框的 `onConfirm = { reboot() }` 未携带 `reason`，因此该路径总是硬重启。修法与影响范围见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 9 节。
+- `ksud soft-reboot` 只重启用户态，内核 uptime 不归零、界面表现弱，使用者容易误判为「点了没反应」。
 - `userspace/ksud/bin/x86_64/` 缺少 `_kernelsu.ko`：上游由 `ddk-lkm.yml` 在 Android DDK 容器里生成，本机没有该容器，因此 x86_64 设备上的 LKM 模式无法从本仓库的资产跑起来（x86_64 的 `ksuinit` 已随仓库分发）。
 
 逐项说明见 [docs/开发文档.md](docs/开发文档.md)。

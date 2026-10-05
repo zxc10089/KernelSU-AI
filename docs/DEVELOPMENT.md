@@ -478,12 +478,54 @@ cargo fmt
 - 安装后确认底栏存在，环境隐藏页在第三位，且管理器身份被内核接受。
 - 打开环境隐藏页，确认运行模式提示与实际内核一致；若内核无法回答，页面应显示全部条目并给出说明。
 - 执行一次一键隐藏，确认步骤日志完整、顺序符合 `order` 表，并在重启后复核模块状态。
+- 逐个运行内置检测器，按第 9 节口径判读：核心效果看 Su / Magisk / 模块文件类与密钥认证，注入面命中（Hunter、春秋）属已知代价。
+- 「重启」按钮：点前确认按钮是否置灰与文案是「重启」还是「软重启」，点后以 `/proc/uptime` 是否归零区分硬重启与用户态软重启。
 
 **文档自查**
 
 - 全文不得出现本机绝对路径、私有目录名与多代理协作痕迹。
 - 提到具体实现时给出仓库相对路径与函数/常量名；行号只作参考。
 - 无法在仓库内核对的内容不写入，或标注「待验证」。
+
+## 9. 对抗性验收与「重启」定位（真机实测）
+
+### 9.1 环境与安装方式
+
+设备 OPPO PMA110，Android 16（sdk 36），安全补丁 2026-08-01；fork 身份 32601-2（v3.3.0+main，包名 `me.weishu.kernelsu.hide`），内核 6.6.77-android15-8，SELinux 强制执行，LKM 模式下环境隐藏页显示「功能完整」与「已按 LKM 模式过滤，共隐藏 1 项」。生效的隐藏资源包为 Hybrid Mount v6.2.3-rc.2、Zygisk Next v1.4.3、LSPosed v2.2.0、AlwaysStrong v1.0.4、HMA-OSS Zygisk oss-173、PathMask v2.8.2（android15-6.6）；自动神仙救砖模块未启用。
+
+9 个检测器全部经管理器「环境隐藏 → 快捷安装」卡片安装，其日志逐条打印「第 N/M 步 · 名称 · 成功」。对比结论：走系统安装器（`adb install`，shell uid）时，ruru / 春秋 / Hunter 会被 ColorOS 的安装引导拦截（`com.oplus.appdetail/.model.guide.ui.InstallGuideActivity`，中高风险变体没有「继续安装」按钮）；管理器自带的 root 安装路径不弹确认框，可静默装完。
+
+验收手段为 `uiautomator dump` 取文本节点加设备截图人工判读，设备截图不入库。
+
+### 9.2 逐个检测器的结论
+
+| # | 检测器 | 包名 | 版本 | 结论 | 关键观察 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | momo 真机检测 | `io.github.vvb2060.mahoshojo` | 4.4.1 | 无 root/隐藏命中，残留可疑迹象 | 结论行「没有发现修改，但是存在可疑迹象」；唯一一条可疑痕迹是「已开启调试模式」——由测试本身（主机 adb 驱动）造成；另打印系统 Fingerprint 与安全补丁级别 |
+| 2 | ruru 如如检测 | `com.byxiaorun.detector` | V1.1.1 (15) | 3 组「可疑」，无 root/隐藏命中 | 风险分 0.0；环境检测、PM 命令 / PM 混合API / PM 主界面、Libc 与 Syscall 文件检查、Xposed 模块、LSPatch、Magisk 软件、帐户均为「未发现」；「PM 常规Api查询」标可疑但展开后的每一条（Magisk / LSPosed / XPrivacyLua / HMA 等包名）都是 ✓，即隐藏本身有效；另两项可疑为「无障碍服务」与「设置属性」 |
+| 3 | Hunter 猎人检测 | `com.zhenxi.hunter` | 6.65 | 判定被 Hook 与修改 | 全屏红字「黑灰产设备,当前程序已经被Hook&修改!」，风险分 0.0；说明 Zygisk / HMA-OSS 对应用进程的注入在自身进程内可见；未命中 Su / Magisk 文件类 |
+| 4 | Luna 检测 | `luna.safe.luna` | 1.4.3.5 | 未取得判定（覆盖缺口） | 首屏弹更新提示，取消后停在「等待授权」，随后「超时 / Get Luna Version error」；设备联网正常（ping 8.8.8.8 0% 丢包）、INTERNET 已授权，是其授权/版本服务不可达 |
+| 5 | 紫色放大镜 内存检测器 | `io.github.huskydg.memorydetector` | v2.1 | 通过 | 首屏即「Looks fine! Nothing is found.」 |
+| 6 | 密钥认证 KeyChain 测试 | `wu.keyChain.test` | — | 通过 | 谷歌硬件根证书可用、**引导加载程序已锁定**、可信执行环境「正常」、密钥认证 2.0.3；证书链为 Google 根签发的 Android Keystore 密钥，说明 AlwaysStrong 的密钥伪装在认证链上成立 |
+| 7 | 应用列表检测器 | `com.tsng.applistdetector` | V1.3.2 | 头部标记异常环境，各项未发现 | 标题行「abnormal environment」，随后 pm list packages / pm 常规API / pm 混合API / getPackagesHoldingPermissions / queryIntentActivities / libc / syscall / magisk 随机包名 / xposed 模块全部「未发现」 |
+| 8 | 春秋检测 | `com.chunqiunativecheck` | 3.9 (55) | 判定 System compromised | 风险分 0.0；主界面红条「System compromised / 以下检测项存在异常，请核查环境完整性」；可见异常项为 `com.didjdk.adbhelper +7` 与 `Tampered Attestation Key (26)`；该 APK 启动即弹不可关闭的「发现新版本」对话框（无取消/关闭，返回键、点击遮罩、`pm clear`、断网均无效），完整清单未能逐条展开 |
+| 9 | MT 管理器 | `bin.mt.plus.canary` | — | 正常启动（人工比对工具） | 文件管理界面可正常浏览 `/sdcard`；该 APK 为资源包内的商用闭源工具，本身不产出自动判定 |
+
+**口径**：隐藏链路的核心效果成立——没有任何检测器报出 Su、Magisk、模块文件或 Syscall/Libc 类命中，密钥认证给出「引导加载程序已锁定」与正常 TEE；但注入面仍可被观测（Hunter 在自身进程内看到 Hook），并且环境属性类检测还有三处「可疑」（ruru 的无障碍服务、设置属性、PM 常规Api查询）与两处篡改类判定（春秋的 Tampered Attestation Key、应用列表检测器的 abnormal environment 头部）。这些是设计取舍的边界，不是安装失败。
+
+### 9.3 「重启」按钮：点击无响应的定位
+
+**代码路径**：环境隐藏页「一键隐藏」卡片右下的按钮在 `manager/app/src/main/java/me/weishu/kernelsu/ui/screen/hiding/HideEnvironmentMiuix.kt:372-391`（Material 版为 `HideEnvironmentMaterial.kt:361`）：文案由 `isSoftRebootPreferred()` 决定显示「重启」还是「软重启」，`onClick` 传入 `soft_reboot` 或空串，`enabled = !uiState.isBatchRunning`。`isSoftRebootPreferred()`（`manager/app/src/main/java/me/weishu/kernelsu/data/repository/SettingsRepositoryImpl.kt:25-27`）在 late-load（免重启加载）模式或设置项 `soft_reboot` 为真时为真。`rememberRebootAction()`（`manager/app/src/main/java/me/weishu/kernelsu/ui/component/rebootlistpopup/RebootListPopup.kt:44-58`）在 late-load 模式且未指定 reason 时先弹确认框，否则直接调用 `reboot(reason)`；`reboot()`（`manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt:501-512`）对 `soft_reboot` 走 `ksud soft-reboot`，其余走 `svc power reboot <reason> || /system/bin/reboot <reason>`。
+
+**真机复现**：页面该卡片有两个可点击容器，「开始隐藏」与「重启」；点击「重启」容器中心后设备真实重启——adb 连接中断，`/proc/uptime` 由 32269 归零再回到 22，`sys.boot_completed` 恢复为 1。当时页面文案是「重启」而非「软重启」，因此未弹确认框，与代码路径一致。
+
+**结论**：按钮本身没有失效，「点击无响应」是状态相关的表现，可复现路径有三条：
+
+1. 一键隐藏批次运行期间 `enabled = false`，点击被静默忽略（卡片同时置灰）。
+2. 软重启偏好生效时（late-load 模式或设置开启）执行的是 `ksud soft-reboot`，只重启用户态：内核 uptime 不归零、界面只是短暂闪一下，容易被误判为没反应。
+3. late-load 模式下先弹确认框，不点「确定」就不会重启。
+
+**发现的一处真实缺陷**：确认框的 `onConfirm = { reboot() }` 没有携带 `reason`，因此在 late-load 模式下即使偏好软重启，经确认框执行的动作也总是硬重启。修法是把确认框的构造放进返回的 lambda 内以捕获 `reason`，例如 `{ reason -> if (Natives.isLateLoadMode && reason.isEmpty()) showConfirm(onConfirm = { reboot(reason) }) else reboot(reason) }`。本次只定位不改码。
 
 ## 附录 A. 关键常量一览
 
