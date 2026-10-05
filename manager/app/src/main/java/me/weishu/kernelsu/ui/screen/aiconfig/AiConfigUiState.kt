@@ -58,12 +58,6 @@ data class AiConfigUiState(
      * never goes through this: it takes effect immediately.
      */
     val pendingScopeElevation: AiAccessScope? = null,
-    /**
-     * The scope the last recorded change moved away from, when it differs from the current one.
-     * The settings screen offers it as "restore the previous scope"; the assistant history page
-     * keeps showing assistant actions only.
-     */
-    val restoreScope: AiAccessScope? = null,
     /** Whether the model list sheet is currently open. */
     val modelListSheetVisible: Boolean = false,
     val modelListLoading: Boolean = false,
@@ -131,7 +125,6 @@ data class AiConfigActions(
     val onOpenScopeSheet: () -> Unit,
     val onDismissScopeSheet: () -> Unit,
     val onScopeSelected: (AiAccessScope) -> Unit,
-    val onRestoreScope: () -> Unit,
     val onCancelScopeElevation: () -> Unit,
     val onConfirmScopeElevation: () -> Unit,
 )

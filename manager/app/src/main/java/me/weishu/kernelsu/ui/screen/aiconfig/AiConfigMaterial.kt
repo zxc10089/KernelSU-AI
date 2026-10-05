@@ -404,23 +404,7 @@ fun AiConfigPagerMaterial(
                 ),
             )
 
-            uiState.restoreScope?.let { previous ->
-                // The scope change itself is recorded in the audit file; this is the settings-side
-                // way back, so the assistant history stays clean.
-                Text(
-                    text = stringResource(
-                        R.string.ai_access_scope_restore,
-                        stringResource(previous.labelRes),
-                    ),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .padding(start = 20.dp, end = 20.dp)
-                        .clickable { actions.onRestoreScope() },
-                )
-            }
-
-            // Worst case cost of one conversation with the settings above: the largest whole
+            // Worst case size of one conversation with the settings above: the largest whole
             // read counts once and every round adds its own overhead on top.
             val estimateTokens = AiTokenEstimate.worstCaseTokens(
                 uiState.fullReadThresholdKb,
@@ -431,7 +415,6 @@ fun AiConfigPagerMaterial(
                     R.string.ai_token_estimate,
                     AiTokenEstimate.wan(estimateTokens),
                     AiTokenEstimate.kilo(estimateTokens),
-                    AiTokenEstimate.yuan(estimateTokens),
                 ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

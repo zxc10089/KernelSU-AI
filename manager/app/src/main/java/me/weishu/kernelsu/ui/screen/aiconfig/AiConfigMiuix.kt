@@ -406,27 +406,11 @@ fun AiConfigPagerMiuix(
                                 },
                                 onClick = actions.onOpenScopeSheet,
                             )
-                            uiState.restoreScope?.let { previous ->
-                                // The scope change itself is recorded in the audit file; this is
-                                // the settings-side way back, so the assistant history stays clean.
-                                Text(
-                                    text = stringResource(
-                                        R.string.ai_access_scope_restore,
-                                        stringResource(previous.labelRes),
-                                    ),
-                                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                                    color = colorScheme.primary,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { actions.onRestoreScope() }
-                                        .padding(horizontal = 4.dp, vertical = 8.dp),
-                                )
-                            }
                         }
                     }
                 }
 
-                // Worst case cost of one conversation with the settings above: the largest whole
+                // Worst case size of one conversation with the settings above: the largest whole
                 // read counts once and every round adds its own overhead on top.
                 item(key = "ai_token_estimate") {
                     val estimateTokens = AiTokenEstimate.worstCaseTokens(
@@ -438,7 +422,6 @@ fun AiConfigPagerMiuix(
                             R.string.ai_token_estimate,
                             AiTokenEstimate.wan(estimateTokens),
                             AiTokenEstimate.kilo(estimateTokens),
-                            AiTokenEstimate.yuan(estimateTokens),
                         ),
                         fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         color = colorScheme.onSurfaceVariantSummary,

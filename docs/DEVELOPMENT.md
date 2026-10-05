@@ -299,13 +299,13 @@ val runtimeMode = when {
 - `ui/screen/aiconfig/AiProviderCatalog.kt`：`AiProviderGroup { RECOMMENDED, LOCAL, MORE }`，默认 provider 为 `deepseek`，默认端点为 `https://api.deepseek.com/v1/chat/completions`；同一文件还登记了 OpenAI 兼容、Anthropic、本地推理（如 Ollama、LM Studio）等条目。
 - 模型列表：`data/remote/AiModelListClient.kt` 由聊天端点推导 `/models`，按 provider 家族选择鉴权头（Bearer，或 `x-api-key` + `anthropic-version`），再解析返回的模型 id 列表。
 - 设置存储：`data/repository/AiSettingsRepositoryImpl.kt` 使用独立的偏好文件 `ai_settings`，键为 provider / endpoint / api_key / model_name 等。API 密钥以明文 XML 存放，与仓库既有做法一致，源码注释已标明该风险。
-- 运行参数：轮数 `AiRounds`（默认 50，上限 100，可选档位 1/2/3/5/8/10/30/50/80）、读取上限 `AiReadLimits`（默认分块 128000、整读 2048 KB，上限 256000 / 4096 KB）、消耗估算 `AiTokenEstimate`（约 4 字符 = 1 token，每轮固定开销 2000 token，并按单价换算金额）。安全卡底部即时刷新最坏情况估算，便于用户在放开参数前看到代价。
+- 运行参数：轮数 `AiRounds`（默认 50，上限 100，可选档位 1/2/3/5/8/10/30/50/80）、读取上限 `AiReadLimits`（默认分块 128000、整读 2048 KB，上限 256000 / 4096 KB）、消耗估算 `AiTokenEstimate`（约 4 字符 = 1 token，每轮固定开销 2000 token）。安全卡底部即时刷新最坏情况估算，便于用户在放开参数前看到 token 量级。
 
 ### 5.3 访问范围
 
 `data/agent/AiAccessScope.kt` 定义三档：`NONE`（默认，fail-closed）、`DATA_ADB`、`ROOT_FS`。派生属性包括 `canReadFiles`、`coversDataAdb`、`coversRoot`；`isElevationFrom(current)` 用 ordinal 比较判断是否为升档；旧的布尔开关通过 `fromLegacyAllowModuleDir` 迁移。
 
-口径：升档必须显式确认（弹窗），降档立即生效并写审计（`origin = user`，不进入「AI 操作历史」；配置页访问范围下方提供「恢复上一档」）。所有文件类动作都要求路径落在当前范围内，范围不足时不是静默失败而是拒绝并记录。
+口径：升档必须显式确认（弹窗），降档立即生效并写审计（`origin = user`，不进入「AI 操作历史」）。所有文件类动作都要求路径落在当前范围内，范围不足时不是静默失败而是拒绝并记录。
 
 ### 5.4 动作管线与安全分级
 
@@ -368,7 +368,7 @@ val runtimeMode = when {
 
 - 权限审查页（`ui/screen/aipermission/`）列出持有 root 的应用，可把结果交给控制台分析（`ROOT_REVIEW`）。
 - 模块冲突页（`ui/screen/aiconflict/`，配合 `data/model/ModuleConflict.kt` 与仓库实现）扫描已启用模块并给出冲突结论（`MODULE_CONFLICT`）。
-- 审计页（`ui/screen/aiaudit/`）只展示 AI 的动作记录（`origin = assistant`），并对可撤销动作提供撤销入口；用户自己的档位变更不进该页，改由配置页「恢复上一档」处理。
+- 审计页（`ui/screen/aiaudit/`）只展示 AI 的动作记录（`origin = assistant`），并对可撤销动作提供撤销入口；用户自己的档位变更不进该页，只留在审计文件中（界面不提供一键还原）。
 
 ### 5.9 界面与本地化
 

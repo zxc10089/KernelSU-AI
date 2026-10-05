@@ -144,7 +144,7 @@
     +----------------------------------------------------------+
     |  请求失败（401、超时）的提示会显示在这里                     |
     +----------------------------------------------------------+
-    |  当前配置下，单次对话最高约消耗 47 万 Token（闲时约 ¥0.10）  |
+    |  当前配置下，单次对话最高约消耗 47 万 Token  |
     +----------------------------------------------------------+
 
 | 规格项 | 值 | 来源 / 备注 |
@@ -161,7 +161,7 @@
 | 错误槽 | 卡片下方一行次级文本，有错误时换成红色并把文案替换为错误详情 | ai_error_slot_hint |
 | 参数默认值 | 最大轮次 **50**（选项 1/2/3/5/8/10/30/50/80，自定义 1–100，兜底由 AiRounds.sanitize 夹取）；单次读取上限 **128000 字符**（选项 2000/4000/8000/16000/32000/64000/128000/256000，自定义 500–256000）；全量读取阈值 **2048 KB**（选项 32/64/100/256/512/1024/2048，自定义 8–4096） | `ui/screen/aiconfig/AiRounds.kt`、`ui/screen/aiconfig/AiReadLimits.kt`；执行器的 readFileWindow 直接使用这两个设置 |
 | 快捷策略模板 | 卡片 2 顶部一行三选一，位于两个开关**上方**；点击即写 allowShell 与访问范围档位（宽范围仍走升权强拦截弹窗）；下方一行小字脚注（ai_template_footnote） | `ui/screen/aiconfig/AiPolicyTemplate.kt`（matching(allowShell, scope)；三档 STRICT_READ_ONLY / SMART_ASSISTANT / GEEK）；AiConfigViewModel.applyTemplate；行组件 AiTemplateRowMiuix / AiTemplateRowMaterial |
-| Token 成本预估 | 错误槽上方一行次级文本，随上方三个参数即时变化 | `ui/screen/aiconfig/AiTokenEstimate.kt`：worstCaseTokens = 全量 KB × 1024 / 4 + 轮次 × 2000（CHARS_PER_TOKEN = 4、ROUND_OVERHEAD_TOKENS = 2000）；价格 YUAN_PER_MILLION = 0.02（deepseek flash 闲时缓存命中）；文案 ai_token_estimate |
+| Token 量级预估 | 错误槽上方一行次级文本，随上方三个参数即时变化 | `ui/screen/aiconfig/AiTokenEstimate.kt`：worstCaseTokens = 全量 KB × 1024 / 4 + 轮次 × 2000（CHARS_PER_TOKEN = 4、ROUND_OVERHEAD_TOKENS = 2000）；只显示 Token 量级，不换算金额；文案 ai_token_estimate |
 
 **硬性约定**：密钥明文存 SharedPreferences（`ai_settings`，见 `data/repository/AiSettingsRepositoryImpl.kt`）是当前已知缺口，已在数据层注释记录（不为此单独引入加密依赖）；本文不新增加密要求。
 
@@ -319,7 +319,7 @@
 | module | enabled | `execute(AiAction.EnableModule(target))` |
 | module | disabled | `execute(AiAction.DisableModule(target))` |
 | move_to_trash | 原路径 | `mv <after> <before>`（回收站还原）后写审计 |
-| SCOPE_CHANGE | 档位键名 | `settings.accessScope = AiAccessScope.fromKey(before)`（该行不再出现在本页；配置页的「恢复上一档」走同一读取路径 `AiAuditRepository.latest(SCOPE_CHANGE, user)`） |
+| SCOPE_CHANGE | 档位键名 | `settings.accessScope = AiAccessScope.fromKey(before)`（该行不再出现在本页，也不提供一键还原；审计仍记录 `origin = user` 的档位变更） |
 | 其他 | — | 不支持，行内不出现撤销按钮 |
 
 | 规格项 | 值 |
@@ -469,7 +469,7 @@
 | 方向 | 流程 | 审计 |
 | --- | --- | --- |
 | 升档 | 选择目标档 → STRICT 强拦截弹窗 → 单击确认 → 生效 | AiAuditEntry(kind = SCOPE_CHANGE, origin = user, target / before / after / scope, undoable = true)，不进「AI 操作历史」 |
-| 降档 | 选择目标档 → 立即生效，无弹窗 | 同上（配置页「恢复上一档」即回到上一档） |
+| 降档 | 选择目标档 → 立即生效，无弹窗 | 同上（档位变更只留在审计文件，界面不提供一键还原） |
 | 失败 | 越界访问被拒 | result = denied |
 
 ---
@@ -515,10 +515,10 @@
 | D-e | 删除文件 | 移入 /data/adb/.ai_trash/ 而非 rm | 保留一键撤销能力 | 已实现 |
 | D-f | 权限审查由 AI 逐条判定 | 本地确定性分级（§3.5 规则表）+ 一键进入控制台做 AI 深入审查 | 页面离线可用、结论可复核；AI 深审复用已实现的动作 / 审计通道，不新开第二条请求链路 | 已实现 |
 | D-g | 冲突检测由 AI 判定 | 本地扫描（§3.6 规则表）+ 一键进控制台让 AI 解读 | 文件重叠是集合运算，本地算得准且不花 token | 已实现 |
-| D-h | 全量读取阈值上限受模型上下文约束 | 默认直接放到 2048 KB（= 客户端文本上限 2 MB），另加成本预估行 | 旋钮由用户掌控，成本已在界面提示 | 已实现（风险登记见 §10 尾注） |
+| D-h | 全量读取阈值上限受模型上下文约束 | 默认直接放到 2048 KB（= 客户端文本上限 2 MB），另加 Token 量级预估行 | 旋钮由用户掌控，量级已在界面提示 | 已实现（风险登记见 §10 尾注） |
 | D-i | 计划模式开关放在「模型名**旁**」 | 移入 composer 动作行，做成 Chat / Plan 胶囊 chip（既不在标题行、也不在标题下方独立一行） | 模式与工具入口统一收进输入区；标题行右侧已被清空控件占用，放不下第三个控件 | 已实现；位置是否采纳仍待裁决 |
 | D-j | 计划模式仅自动放行只读动作 | `safe_exec_shell` 在 AiPathGuard 中档位为 LIGHT，但在计划模式下仍随只读集合自动放行 | 计划卡在批准**之前**已把每步档位与命令公示，一键执行即等于用户对该批的授权；且该动作本身只读（白名单） | 已实现；是否改为「连只读也逐个确认」仍待裁决 |
-| D-k | 附件原样交给模型 | 单文件上限 8 MB；文本截断 64000 字符；zip 只抽 .log / .txt 前 10 条（每条 4000 字符）；图片行为见 D-ac | 手机端解析成本与 token 成本都要有上界 | 已实现 |
+| D-k | 附件原样交给模型 | 单文件上限 8 MB；文本截断 64000 字符；zip 只抽 .log / .txt 前 10 条（每条 4000 字符）；图片行为见 D-ac | 手机端解析开销与 token 量级都要有上界 | 已实现 |
 | D-l | 快捷策略模板只改开关 | 点模板同时写 allowShell 与访问范围；宽范围（ROOT_FS）仍走升权强拦截弹窗 | 模板的本质就是一次批量设置；放宽范围属高危，必须保留人工确认 | 已实现 |
 | D-m | 输入区观感 | 重做为单容器结构（值与来源见 §3.8） | 旧结构「输入框 + 按钮同一行」靠 weight 挤压，达不到参考图观感 | 已实现 |
 | D-n | 沿用 Miuix `TextField` | Miuix 侧改用 `androidx.compose.foundation.text.BasicTextField` + decorationBox 自绘占位 | Miuix `TextField` 自带圆角底色，放进新容器会出现「框中框」 | 已实现 |
@@ -563,7 +563,7 @@
 | A14 | 模块冲突检测页能扫出真实重叠（构造两个模块共用同一 system 文件） | 运行时构造后重新扫描 |
 | A15 | 审计页展示历史记录，且对 A13 的 su 条目可一键撤销（恢复授权 + 追加 undo 条目） | 运行时 + 读审计文件 |
 | A16 | 三页在 Miuix 与 Material 两种模式均可进入 | 双模式各走一轮 |
-| A17 | 配置页底部显示 Token 成本预估，且随参数变化实时更新 | 源码：`AiTokenEstimate`；运行时改参数后复读该行 |
+| A17 | 配置页底部显示 Token 量级预估（只显示 token 数，不换算金额），且随参数变化实时更新 | 源码：`AiTokenEstimate`；运行时改参数后复读该行 |
 | A18 | 放宽后的默认值与新选项可见（轮次 50、单次上限 128000 字符、全量阈值 2048 KB） | 源码：`AiRounds` / `AiReadLimits`；运行时读选项行 |
 | A19 | 计划模式：模型先出「任务计划卡」不立刻执行；点「一键执行全部」后只读动作直接跑、写入仍弹原有确认 | 运行时结合 [AI_AGENT] 日志（「计划模式：已生成 N 步计划，等待用户批准」→「静默执行：…」/「计划模式自动放行只读动作：…」） |
 | A20 | 计划执行失败即暂停：失败步标红、后续步 Skipped、计划卡变 Paused、按钮换成「修改计划 / 中止」 | 运行时构造失败步骤（读取一个不存在的路径）后读计划卡 |
@@ -576,7 +576,7 @@
 | A27 | 附件 chip 出现在容器内、文字区上方，✕ 可单个移除，有附件时无文字也能发送 | 运行时读 chip 位置与发送按钮可用态 |
 | A28 | 重设计未破坏计划模式管线（模式切换、生成计划卡、步骤 Proposed） | 运行时结合 [AI_AGENT] 日志与计划卡 |
 | A29 | Material flavour 与 Miuix 结构一致 | 切换 UI Style 后逐项对照 |
-| A30 | AI 操作历史只出现 AI 的动作（「撤销」条目不显示裸枚举，而是本地化范围名）；用户档位变更显示在配置页的「恢复上一档」 | 运行时读行副标题与展开详情 |
+| A30 | AI 操作历史只出现 AI 的动作（「撤销」条目不显示裸枚举，而是本地化范围名）；用户档位变更只留在审计文件，界面不提供一键还原 | 运行时读行副标题与展开详情 |
 | A31 | 标题行「清空」是图标 + 短标签胶囊而非纯文字按钮 | 源码：`AiConsoleMiuix.kt` 的 clip(RoundedCornerShape(16.dp)) 胶囊；运行时对照 |
 | A32 | 流式回复增长时列表尾部跟随，末行文字不被 composer 上边缘切断 | 源码：消息列表 `contentPadding(top = 4.dp, bottom = 12.dp)`；运行时观察末行与容器上边缘 |
 | A33 | 空对话时「清空」胶囊为可见禁用态（不再与可点状态同形） | 运行时对照空 / 非空两种状态 |
@@ -598,6 +598,6 @@
 | A49 | 在计划模式里说一句「做一个模块」即可产出并安装内核模块（make_module 全链路） | 运行时从「模块制作 → 让 AI 起草」进入，核对 [AI_AGENT] 日志、计划卡、STRICT 弹窗与安装器输出 |
 | A50 | 动作卡「在模块制作页打开」跳转到模块制作页并预填整份草稿 | 源码：`ui/component/aichat/AiChatMiuix.kt` / `AiChatMaterial.kt` 逐条渲染动作卡时必须传 `onOpenModuleMaker`；`ModuleDraftStore.take()` 在屏幕的 `LaunchedEffect(Unit)` 中消费（导航条目重建而 ViewModel 被复用时 init 不再执行，草稿会丢）；运行时点该按钮 |
 
-> **A17 已知风险（登记）**：全量读取阈值的默认值 2048 KB 恰好等于客户端可选的文本读取上限，一次全量读取按 `AiTokenEstimate` 的口径约 52 万 token（2048 × 1024 / 4），超过多数模型 128K 的上下文窗口，HTTP 层会返回 context-length 400（表现为控制台「请求失败：HTTP 400」）。当前实现把旋钮完全交给用户，预估行已把成本写在界面上；若后续出现该类 400，建议在 `readFileWindow` 增加按 token 预算的二次夹取（例如全量读取也受一个 token 上限约束，超出则回退到 `charCap = readChunkLimit` 并附提示）。
+> **A17 已知风险（登记）**：全量读取阈值的默认值 2048 KB 恰好等于客户端可选的文本读取上限，一次全量读取按 `AiTokenEstimate` 的口径约 52 万 token（2048 × 1024 / 4），超过多数模型 128K 的上下文窗口，HTTP 层会返回 context-length 400（表现为控制台「请求失败：HTTP 400」）。当前实现把旋钮完全交给用户，预估行已把 token 量级写在界面上；若后续出现该类 400，建议在 `readFileWindow` 增加按 token 预算的二次夹取（例如全量读取也受一个 token 上限约束，超出则回退到 `charCap = readChunkLimit` 并附提示）。
 
 > **未在本文验证的项**：A46（图片像素随消息发送）只有编译级证据；A20 / A22 / A29 / A47 / A49 / A50 需要在设备上重放运行时步骤。其余条目的结论均可由源码直接核对。

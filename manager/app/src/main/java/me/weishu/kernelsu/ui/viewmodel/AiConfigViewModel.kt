@@ -50,7 +50,6 @@ class AiConfigViewModel(
                 fullReadThresholdKb = repo.fullReadThresholdKb,
             )
         }
-        loadRestorableScope()
     }
 
     fun openProviderSheet() = _uiState.update { it.copy(providerSheetVisible = true) }
@@ -242,9 +241,9 @@ class AiConfigViewModel(
         if (before == scope) return
         repo.accessScope = scope
         _uiState.update { it.copy(accessScope = scope) }
-        // Every widening or narrowing is recorded, so the previous value can be restored later.
-        // It is written with ORIGIN_USER: the assistant history page is not the place for the
-        // user's own settings change, and this screen offers its own "restore previous" action.
+        // Every widening or narrowing is recorded with ORIGIN_USER, so the audit file keeps the
+        // user's own setting changes apart from what the assistant did; the assistant history
+        // page, which only shows ORIGIN_ASSISTANT rows, stays free of them.
         viewModelScope.launch {
             audit.append(
                 AiAuditEntry(
@@ -258,31 +257,7 @@ class AiConfigViewModel(
                     origin = AiAuditEntry.ORIGIN_USER,
                 )
             )
-            loadRestorableScope()
         }
     }
 
-    /**
-     * Puts the scope back to what it was before the last recorded change. The restore goes through
-     * [selectScope], so widening access still needs the typed confirmation; it writes its own
-     * record, which makes the restore the new "previous value".
-     */
-    fun restorePreviousScope() {
-        val target = _uiState.value.restoreScope ?: return
-        selectScope(target)
-    }
-
-    /**
-     * Reads the previous scope out of the audit file. Kept apart from [refresh] because it touches
-     * the file system; the state lands when the read finishes.
-     */
-    private fun loadRestorableScope() {
-        viewModelScope.launch {
-            val entry = audit.latest(AiAuditEntry.KIND_SCOPE_CHANGE, AiAuditEntry.ORIGIN_USER)
-            val previous = entry?.before?.let { AiAccessScope.fromKey(it) }
-            _uiState.update { state ->
-                state.copy(restoreScope = previous?.takeIf { it != state.accessScope })
-            }
-        }
-    }
 }

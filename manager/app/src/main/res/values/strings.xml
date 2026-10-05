@@ -430,7 +430,6 @@
     <string name="ai_access_scope_elevate_title">Raise the AI access scope?</string>
     <string name="ai_access_scope_elevate_message">After raising the scope the assistant may read and change: %1$s</string>
     <string name="ai_access_scope_confirm_button">Raise scope</string>
-    <string name="ai_access_scope_restore">Restore the previous scope: %1$s</string>
     <!-- AI assistant: console (phase 2) -->
     <string name="ai_console_title">AI console</string>
     <string name="ai_console_clear">Clear</string>
@@ -631,7 +630,7 @@
     <string name="ai_max_rounds_custom_hint">Enter 1–100</string>
     <string name="ai_read_limit_custom_hint">Enter 500–256000</string>
     <string name="ai_full_read_custom_hint">Enter 8–4096</string>
-    <string name="ai_token_estimate">Up to about %2$s tokens per conversation with the current settings (idle ≈ ¥%3$s).</string>
+    <string name="ai_token_estimate">Up to about %2$s tokens per conversation with the current settings.</string>
     <string name="ai_permission_title">AI permission review</string>
     <string name="ai_permission_entry">Root permission review</string>
     <string name="ai_permission_refresh">Refresh</string>

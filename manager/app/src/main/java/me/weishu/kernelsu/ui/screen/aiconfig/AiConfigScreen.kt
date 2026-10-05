@@ -51,7 +51,6 @@ fun AiConfigScreen() {
         onOpenScopeSheet = viewModel::openScopeSheet,
         onDismissScopeSheet = viewModel::dismissScopeSheet,
         onScopeSelected = viewModel::selectScope,
-        onRestoreScope = viewModel::restorePreviousScope,
         onCancelScopeElevation = viewModel::cancelScopeElevation,
         onConfirmScopeElevation = viewModel::confirmScopeElevation,
     )

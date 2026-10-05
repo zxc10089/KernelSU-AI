@@ -40,16 +40,6 @@ class AiAuditRepositoryImpl : AiAuditRepository {
         }
     }
 
-    override suspend fun latest(kind: String, origin: String): AiAuditEntry? = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            if (!file.exists()) return@withLock null
-            file.readLines()
-                .asSequence()
-                .mapNotNull { AiAuditEntry.fromJson(it) }
-                .lastOrNull { it.kind == kind && it.origin == origin }
-        }
-    }
-
     /** Keeps the newest MAX_ENTRIES lines. */
     private fun trimIfNeeded() {
         val lines = file.readLines()

@@ -424,7 +424,6 @@
     <string name="ai_access_scope_elevate_title">提升 AI 访问范围？</string>
     <string name="ai_access_scope_elevate_message">提升后，AI 将可以读取和修改：%1$s</string>
     <string name="ai_access_scope_confirm_button">确认提升</string>
-    <string name="ai_access_scope_restore">恢复上一档：%1$s</string>
     <!-- AI 助手：控制台（阶段 2） -->
     <string name="ai_console_title">AI 控制台</string>
     <string name="ai_console_clear">清空对话</string>
@@ -624,7 +623,7 @@
     <string name="ai_max_rounds_custom_hint">请输入 1–100</string>
     <string name="ai_read_limit_custom_hint">请输入 500–256000</string>
     <string name="ai_full_read_custom_hint">请输入 8–4096</string>
-    <string name="ai_token_estimate">当前配置下，单次对话最高约消耗 %1$s 万 Token（闲时约 ¥%3$s）。</string>
+    <string name="ai_token_estimate">当前配置下，单次对话最高约消耗 %1$s 万 Token。</string>
     <string name="ai_permission_title">AI 权限审查</string>
     <string name="ai_permission_entry">root 权限审查</string>
     <string name="ai_permission_refresh">刷新</string>
