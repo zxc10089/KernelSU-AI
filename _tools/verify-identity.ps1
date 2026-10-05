@@ -221,6 +221,40 @@ if (Test-Path $signerJson) {
 } else {
     Warn "no _tools/project-signer.json" "cannot read the project cert size: $signerJson"
 }
+function Find-ExpectedSize {
+    param([byte[]]$Bytes, [int]$Want)
+    # The DER-length check compares against a compile-time constant, so its encoding depends on the
+    # architecture of the module. Locate it by instruction shape, never by a fixed offset:
+    #   aarch64: SUBS WZR, W21, #imm -> mask 0xFFC003FF == 0x710002BF, imm = (w >> 10) & 0xFFF
+    #   x86_64 : cmp/mov reg, imm32 -> 3D | 81 /7 | B8+r | C7 /0 (mod=11), imm32 little-endian
+    $res = @{ Ok = $false; Found = '' }
+    if ($Want -le 0) { return $res }
+    $machine = if ($Bytes.Length -gt 20) { [BitConverter]::ToUInt16($Bytes, 18) } else { 0 }
+    if ($machine -eq 183) {
+        for ($i = 0x1000; $i -lt ($Bytes.Length - 4); $i += 4) {
+            $w = [int64][BitConverter]::ToUInt32($Bytes, $i)
+            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
+                $imm = ($w -shr 10) -band 0xFFF
+                if (-not $res.Found) { $res.Found = ('0x{0:X}' -f $imm) }
+                if ($imm -eq $Want) { $res.Ok = $true; return $res }
+            }
+        }
+        return $res
+    }
+    for ($i = 0; $i -lt ($Bytes.Length - 5); $i++) {
+        $b0 = [int]$Bytes[$i]
+        $b1 = [int]$Bytes[$i + 1]
+        $imm = [int64][BitConverter]::ToUInt32($Bytes, $i + 1)
+        $hit = $false
+        if ($b0 -eq 0x3D) { $hit = ($imm -eq $Want) }
+        elseif ($b0 -eq 0x81 -and ($b1 -band 0xF8) -eq 0xF8) { $hit = ($imm -eq $Want) }
+        elseif ($b0 -ge 0xB8 -and $b0 -le 0xBF) { $hit = ($imm -eq $Want) }
+        elseif ($b0 -eq 0xC7 -and ($b1 -band 0xF8) -eq 0xC0) { $hit = ($imm -eq $Want) }
+        if ($hit) { $res.Found = ('0x{0:X}' -f $Want); $res.Ok = $true; return $res }
+    }
+    return $res
+}
+
 $assetRoot = Join-Path $ws 'userspace\ksud\bin'
 $assets = @()
 if (Test-Path $assetRoot) {
@@ -233,21 +267,15 @@ if ($assets.Count -eq 0) {
         $bytes = [System.IO.File]::ReadAllBytes($asset.FullName)
         $text  = [System.Text.Encoding]::ASCII.GetString($bytes)
         $nHash = ([regex]::Matches($text, [regex]::Escape($wantHash))).Count
-        $immOk = $false
-        $found = ''
-        for ($i = 0x1000; $i -lt ($bytes.Length - 4); $i += 4) {
-            $w = [int64][BitConverter]::ToUInt32($bytes, $i)
-            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
-                $imm = ($w -shr 10) -band 0xFFF
-                if (-not $found) { $found = ('0x{0:X}' -f $imm) }
-                if ($wantSize -gt 0 -and $imm -eq $wantSize) { $immOk = $true; break }
-            }
-        }
+        $sizeCheck = Find-ExpectedSize -Bytes $bytes -Want $wantSize
+        $immOk = $sizeCheck.Ok
+        $found = $sizeCheck.Found
         $rel = $asset.FullName.Substring($ws.Length + 1)
         $sha = (Get-FileHash -Algorithm SHA256 $asset.FullName).Hash
         Check "LKM asset carries the project cert SHA-256" ($nHash -ge 1) "$rel hash-literal x$nHash (want >= 1)"
         if ($wantSize -gt 0) {
-            Check "LKM asset expects the project cert DER length" $immOk "$rel cmp-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
+            $arch = if ($bytes.Length -gt 20 -and [BitConverter]::ToUInt16($bytes, 18) -eq 183) { 'aarch64' } else { 'x86_64' }
+            Check "LKM asset expects the project cert DER length" $immOk "$rel [$arch] expected-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
         }
         # PROVENANCE: -DKSU_MANAGER_PACKAGE compiles the manager package name into is_manager_apk().
         # A byte-patched asset rewrites the cert hash and the DER-length immediate only, so the

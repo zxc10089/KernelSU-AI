@@ -2,13 +2,28 @@
 # 本分支同样使用上游的 DDK CI（.github/workflows/build-lkm.yml -> ddk-lkm.yml，身份常量来自
 # kernel/Kbuild 的项目默认值），但为了让下载到的源码快照在没有 Rust/DDK 工具链时也能直接出包，
 # 构建产物随仓库分发，故对下列文件显式放行。
-# 当前 aarch64 的 ko 已改为路径 A：由上游 DDK CI（.github/workflows/build-lkm-fork.yml ->
-# ddk-lkm.yml，身份常量取 kernel/Kbuild 的项目默认值）从源码构建，运行号 37305609190，产物经
-# _tools/adopt-lkm-asset.ps1 收编，含编译期 KSU_MANAGER_PACKAGE 包名校验。
+# 这些 ko 全部是路径 A：由 .github/workflows/build-lkm-fork.yml 调用上游 build-lkm.yml 的 8-KMI
+# 矩阵从源码构建，产物收编到 ci/lkm 分支，再经 _tools/adopt-lkm-asset.ps1 取回本目录，含编译期
+# KSU_MANAGER_PACKAGE 包名校验；单个 KMI 的构建运行号记在 docs/root-crown-appid-fix.md。
 # 没有 DDK 的机器仍可用 _tools/patch-init-boot.py 走等长字节替换的回退交付（见
 # docs/root-crown-appid-fix.md），等长替换只能改证书哈希与 DER 长度，改不出包名校验。
 **/*.ko
 **/ksuinit
+!aarch64/android12-5.10_kernelsu.ko
+!aarch64/android13-5.10_kernelsu.ko
+!aarch64/android13-5.15_kernelsu.ko
+!aarch64/android14-5.15_kernelsu.ko
+!aarch64/android14-6.1_kernelsu.ko
 !aarch64/android15-6.6_kernelsu.ko
+!aarch64/android16-6.12_kernelsu.ko
+!aarch64/android17-6.18_kernelsu.ko
 !aarch64/ksuinit
+!x86_64/android12-5.10_kernelsu.ko
+!x86_64/android13-5.10_kernelsu.ko
+!x86_64/android13-5.15_kernelsu.ko
+!x86_64/android14-5.15_kernelsu.ko
+!x86_64/android14-6.1_kernelsu.ko
+!x86_64/android15-6.6_kernelsu.ko
+!x86_64/android16-6.12_kernelsu.ko
+!x86_64/android17-6.18_kernelsu.ko
 !x86_64/ksuinit

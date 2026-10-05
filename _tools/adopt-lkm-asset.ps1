@@ -6,8 +6,9 @@
 # The asset in the tree today is 'upstream v3.3.0 + two in-place constant replacements' (path B):
 # correct cert hash and DER length, but KSU_MANAGER_PACKAGE is compiled OUT, so a signer match alone
 # decides the crown. A build from source (path A) also carries the package-name check.
-#   path A: .github/workflows/build-lkm-fork.yml  -> artifact aarch64-android15-6.6-lkm
-#           (identity comes from the kernel/Kbuild defaults; no make variables needed)
+#   path A: .github/workflows/build-lkm-fork.yml -> upstream build-lkm.yml matrix, 8 KMIs x 2 ABIs,
+#           artifacts <abi>-<kmi>-lkm fetched from the ci/lkm branch (identity comes from the
+#           kernel/Kbuild defaults; no make variables needed)
 #   path B: _tools/patch-init-boot.py --ko-in <upstream ko> --ko-out <asset>
 # This script checks which one a given .ko is, and refuses anything that is not project-signed.
 #
@@ -23,6 +24,10 @@ param(
     # Target KMI inside the asset tree; must match the file name rust-embed looks up
     # (late_load.rs / boot_patch.rs use format!("{kmi}_kernelsu.ko")).
     [string]$Kmi = 'android15-6.6',
+    # Target ABI directory inside the asset tree (rust-embed folder = bin/<abi>):
+    #   aarch64 -> the 64-bit ARM module that a boot-image patch injects
+    #   x86_64  -> the x86_64 module (upstream ships it as well)
+    [ValidateSet('aarch64', 'x86_64')][string]$Abi = 'aarch64',
     # Accept a path-B (byte-patched) module instead of requiring the package-name check.
     [switch]$AllowPatchedAsset,
     # Validate only: do not copy anything into the tree.
@@ -41,6 +46,40 @@ function Check { param([string]$Name, [bool]$Ok, [string]$Detail)
     Write-Host ('[{0}] {1}' -f $tag, $Name)
     if ($Detail) { Write-Host ('       {0}' -f $Detail) }
 }
+function Find-ExpectedSize {
+    param([byte[]]$Bytes, [int]$Want)
+    # The DER-length check compares against a compile-time constant, so its encoding depends on the
+    # architecture of the module. Locate it by instruction shape, never by a fixed offset:
+    #   aarch64: SUBS WZR, W21, #imm -> mask 0xFFC003FF == 0x710002BF, imm = (w >> 10) & 0xFFF
+    #   x86_64 : cmp/mov reg, imm32 -> 3D | 81 /7 | B8+r | C7 /0 (mod=11), imm32 little-endian
+    $res = @{ Ok = $false; Found = '' }
+    if ($Want -le 0) { return $res }
+    $machine = if ($Bytes.Length -gt 20) { [BitConverter]::ToUInt16($Bytes, 18) } else { 0 }
+    if ($machine -eq 183) {
+        for ($i = 0x1000; $i -lt ($Bytes.Length - 4); $i += 4) {
+            $w = [int64][BitConverter]::ToUInt32($Bytes, $i)
+            if (($w -band 0xFFC003FF) -eq 0x710002BF) {
+                $imm = ($w -shr 10) -band 0xFFF
+                if (-not $res.Found) { $res.Found = ('0x{0:X}' -f $imm) }
+                if ($imm -eq $Want) { $res.Ok = $true; return $res }
+            }
+        }
+        return $res
+    }
+    for ($i = 0; $i -lt ($Bytes.Length - 5); $i++) {
+        $b0 = [int]$Bytes[$i]
+        $b1 = [int]$Bytes[$i + 1]
+        $imm = [int64][BitConverter]::ToUInt32($Bytes, $i + 1)
+        $hit = $false
+        if ($b0 -eq 0x3D) { $hit = ($imm -eq $Want) }
+        elseif ($b0 -eq 0x81 -and ($b1 -band 0xF8) -eq 0xF8) { $hit = ($imm -eq $Want) }
+        elseif ($b0 -ge 0xB8 -and $b0 -le 0xBF) { $hit = ($imm -eq $Want) }
+        elseif ($b0 -eq 0xC7 -and ($b1 -band 0xF8) -eq 0xC0) { $hit = ($imm -eq $Want) }
+        if ($hit) { $res.Found = ('0x{0:X}' -f $Want); $res.Ok = $true; return $res }
+    }
+    return $res
+}
+
 function Warn2 { param([string]$Name, [string]$Detail)
     Write-Host ('[WARN] {0}' -f $Name)
     if ($Detail) { Write-Host ('       {0}' -f $Detail) }
@@ -70,8 +109,10 @@ Write-Host ''
 $isElf = ($bytes.Length -gt 64 -and $bytes[0] -eq 0x7F -and $bytes[1] -eq 0x45 -and $bytes[2] -eq 0x4C -and $bytes[3] -eq 0x46)
 Check 'candidate is an ELF file' $isElf ('magic={0:X2}{1:X2}{2:X2}{3:X2}' -f $bytes[0], $bytes[1], $bytes[2], $bytes[3])
 if ($isElf) {
+    $wantMachine = if ($Abi -eq 'aarch64') { 183 } else { 62 }
+    $wantName    = if ($Abi -eq 'aarch64') { 'aarch64 (e_machine=183)' } else { 'x86_64 (e_machine=62)' }
     $machine = [BitConverter]::ToUInt16($bytes, 18)
-    Check 'candidate is aarch64 (e_machine=183)' ($machine -eq 183) ('e_machine={0}' -f $machine)
+    Check ('candidate is ' + $wantName) ($machine -eq $wantMachine) ('e_machine={0}' -f $machine)
 }
 
 # 2. Project identity constants.
@@ -82,18 +123,9 @@ Check 'candidate whitelists the PROJECT cert SHA-256' ($nHash -ge 1) ('hash-lite
 Check 'candidate does NOT whitelist the official cert' ($nOfficial -eq 0) ('official literal x{0} (want 0)' -f $nOfficial)
 Check 'candidate does NOT whitelist the public debug cert' ($nDebug -eq 0) ('debug literal x{0} (want 0)' -f $nDebug)
 
-# 3. DER length in the cmp immediate, located by instruction shape (SUBS WZR, W21, #imm).
-$foundImm = ''
-$immOk = $false
-for ($i = 0x1000; $i -lt ($bytes.Length - 4); $i += 4) {
-    $w = [int64][BitConverter]::ToUInt32($bytes, $i)
-    if (($w -band 0xFFC003FF) -eq 0x710002BF) {
-        $imm = ($w -shr 10) -band 0xFFF
-        if (-not $foundImm) { $foundImm = ('0x{0:X}' -f $imm) }
-        if ($imm -eq $wantSize) { $immOk = $true; break }
-    }
-}
-Check 'candidate expects the project cert DER length' $immOk ('cmp-size imm={0} (want {1} = 0x{2:X})' -f $foundImm, $wantSize, $wantSize)
+# 3. DER length, located by instruction shape for the candidate's own architecture (see the helper).
+$size = Find-ExpectedSize -Bytes $bytes -Want $wantSize
+Check 'candidate expects the project cert DER length' $size.Ok ('{0} cmp-size imm={1} (want {2} = 0x{3:X})' -f $Abi, $size.Found, $wantSize, $wantSize)
 
 # 4. Which path produced it: only a from-source build carries the package-name check.
 $nPkg = ([regex]::Matches($text, [regex]::Escape($ExpectedPackage))).Count
@@ -109,7 +141,7 @@ if ($pathA) {
 
 if ($fails -gt 0) { Write-Host ''; Write-Host ('ADOPT: REFUSED ({0} failure(s))' -f $fails); exit 1 }
 
-$target = Join-Path $ws ("userspace\ksud\bin\aarch64\{0}_kernelsu.ko" -f $Kmi)
+$target = Join-Path $ws ("userspace\ksud\bin\{0}\{1}_kernelsu.ko" -f $Abi, $Kmi)
 if ((Test-Path -LiteralPath $target)) {
     $oldSha = (Get-FileHash -Algorithm SHA256 $target).Hash
     if ($oldSha -eq $sha) {
@@ -143,7 +175,7 @@ if (-not $DryRun -and -not ($oldSha -eq $sha)) {
     Write-Host "  2. powershell -NoProfile -ExecutionPolicy Bypass -File _tools\build-manager.ps1 -Task ':app:assembleRelease'"
     Write-Host '  3. powershell -NoProfile -ExecutionPolicy Bypass -File _tools\verify-identity.ps1'
     Write-Host '  4. re-patch the boot image so the flashed module is the new one:'
-    Write-Host ('     python _tools\patch-init-boot.py --base <stock init_boot> --out <out.img> --ko-in userspace\ksud\bin\aarch64\' + $Kmi + '_kernelsu.ko --replace-ko --manager-appid <uid%100000>')
+    Write-Host ('     python _tools\patch-init-boot.py --base <stock init_boot> --out <out.img> --ko-in userspace\ksud\bin\' + $Abi + '\' + $Kmi + '_kernelsu.ko --replace-ko --manager-appid <uid%100000>')
 }
 
 if ($Verify -and -not $DryRun) {
