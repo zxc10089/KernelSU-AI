@@ -137,19 +137,16 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 2. **ko 常量改用这张证书**：`KSU_EXPECTED_SIZE=0x342`、`KSU_EXPECTED_HASH=ca40af…`，并定义
    `KSU_MANAGER_PACKAGE=me.weishu.kernelsu.hide`（`kernel/Kbuild:130-157` 会转成 ccflag，让同证书的其他包名也匹配不上）。
 
-本分支的交付方式仍是等长字节补丁（本机没有 DDK）：
+交付有两条路径，**源码构建是正式路径**：
 
-- 内置资产 `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`
-  sha256 `d537e0d76969a7dab712926b292dc66e23f6ba915067e615486d829a738c9178`；
-- 可刷镜像 `_tmp\init_boot_a_projectkey.img`
-  sha256 `26651779a3b17120eb4975cdb2259c7ec871af492b73c4bc4aecf04137c2bfc1`
-  （设备副本 `/data/local/tmp/init_boot_a_projectkey.img`，同一 sha256）；
-- 闸门：`_tools/build-ksud.ps1` 在把资产打进 `libksud.so` 之前核对证书哈希 + DER 长度，不匹配直接抛错；
-  `_tools/verify-identity.ps1` 第 4 节复核同一对特征，`-ExpectedCert` 默认值已改为 `ca40af…`；
-  `_tools/build-manager.ps1` 自动从 `keystore.properties` 读签名参数传给 Gradle，
-  `assembleRelease` 出来的就是 v2-only 的项目签名包。
-- 未落地的一步：真正重编 ko（需要 DDK）时应把上面三个 `KSU_*` 作为 make 变量传入，这样
-  `KSU_MANAGER_PACKAGE` 才生效；当前字节补丁方案下包名校验仍是编译掉的，靠「私钥证书唯一」达到同等效果。
+**路径 A（正式，DDK CI）**：`kernel/Kbuild` 现在把三项身份写成默认值（`0x342` / `ca40af…` / `me.weishu.kernelsu.hide`），与上游给自己写死官方身份的做法一致，因此上游 DDK 工作流无需改动即可构建出正确的 ko：
+
+- 全矩阵：Actions → `Build LKM for KernelSU` → Run workflow（`build-lkm.yml` → `ddk-lkm.yml`，容器 `ghcr.io/ylarod/ddk-min:<kmi>-<ddk_release>`）；
+- 只构建本机需要的 KMI：`.github/workflows/build-lkm-fork.yml`（push `kernel/**` 自动触发，产物名 `aarch64-android15-6.6-lkm`，并把 ko 提交到 `ci/lkm` 分支便于取回）。
+
+**路径 B（回退，本机无 DDK 容器时的交付方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的——靠「私钥证书唯一」达到同等效果。当前内置资产即这条路径：
+
+- 校验闸门同时是两条路径的判据：路径 A 的产物含 `me.weishu.kernelsu.hide` 字符串（只有真正定义 `KSU_MANAGER_PACKAGE` 才会出现），路径 B 的产物没有；`_tools/verify-identity.ps1` 第 4 节核对的是两条路径共有的那对特征（证书哈希 + DER 长度），包名闸门待路径 A 产物落地后加入。
 
 ## 5. 注意事项（踩过的坑）
 

@@ -216,8 +216,12 @@ Write-Host "workspace=$ws\Cargo.toml"
 # does not carry the project signer, so the defect cannot silently come back through the APK.
 #   public facts : _tools/project-signer.json  (certSha256, certDerSize)
 #   how to patch : _tools/patch-init-boot.py --ko-in <ko> --ko-out <ko> --signer-sha256 <hash> --signer-size <len>
-# A REAL module build (needs a DDK, not available here) produces the same constants through Kbuild:
-#   make KSU_EXPECTED_SIZE=0x342 KSU_EXPECTED_HASH=<hash> KSU_MANAGER_PACKAGE=me.weishu.kernelsu.hide
+# A REAL module build produces the same constants through Kbuild alone: kernel/Kbuild carries the
+# project identity as its defaults (0x342 / ca40af... / me.weishu.kernelsu.hide), so upstream's
+# build-lkm.yml -> ddk-lkm.yml (DDK container) builds the fork module with no workflow change:
+#   make                                                                     # Kbuild defaults
+#   make KSU_EXPECTED_SIZE=... KSU_EXPECTED_HASH=... KSU_MANAGER_PACKAGE=... # explicit override
+# The byte patch above is the fallback for machines without a DDK container (this one).
 $signerJson = Join-Path $ws '_tools\project-signer.json'
 $assetRoot  = Join-Path $ws 'userspace\ksud\bin'
 if (Test-Path $signerJson) {

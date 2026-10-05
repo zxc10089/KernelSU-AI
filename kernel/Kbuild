@@ -127,12 +127,27 @@ KSU_NEW_DCACHE_FLUSH := $(shell grep -q __flush_dcache_area $(srctree)/arch/arm6
 $(info -- KSU_NEW_DCACHE_FLUSH: $(KSU_NEW_DCACHE_FLUSH))
 
 
+# ------------------------------------------------------------------------------------------------
+# Fork identity. Upstream hardcodes ITS OWN manager identity here (the official v2 signer: DER
+# length 0x033b, cert sha256 c371061b...); this fork does the same with its own: the project
+# release key (_artifacts/builder/keystore/kernelsu-ai-release.jks, public facts in
+# _tools/project-signer.json) and the fork applicationId. These are defaults, not hard overrides,
+# so a caller can still build another identity with
+#   make KSU_EXPECTED_SIZE=... KSU_EXPECTED_HASH=... KSU_MANAGER_PACKAGE=...
+# KSU_MANAGER_PACKAGE is defined by default because the signer alone is not proof of identity: any
+# app signed with the same key would otherwise be crowned (measured on device 67a86199, where
+# moe.nb4a.debug stole the crown). See docs/root-crown-appid-fix.md and docs/upstream-alignment.md.
+# ------------------------------------------------------------------------------------------------
 ifndef KSU_EXPECTED_SIZE
-KSU_EXPECTED_SIZE := 0x033b
+KSU_EXPECTED_SIZE := 0x342
 endif
 
 ifndef KSU_EXPECTED_HASH
-KSU_EXPECTED_HASH := c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6
+KSU_EXPECTED_HASH := ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec
+endif
+
+ifndef KSU_MANAGER_PACKAGE
+KSU_MANAGER_PACKAGE := me.weishu.kernelsu.hide
 endif
 
 ifdef KSU_MANAGER_PACKAGE

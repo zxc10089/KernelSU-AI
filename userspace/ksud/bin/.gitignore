@@ -1,7 +1,9 @@
 # 上游在该目录存放 CI 注入的构建产物（LKM / ksuinit），因此默认忽略。
-# 本分支没有 CI，补丁后的 aarch64 资产改为随仓库分发，故对这些文件显式放行；
-# x86_64 的 ksuinit 按上游 ksuinit.yml 的静态链接 recipe 在本机构建后一并纳入，
-# x86_64 的 _kernelsu.ko 需要 Android DDK 容器（ddk-lkm.yml），本机无法生成，故仍缺。
+# 本分支同样使用上游的 DDK CI（.github/workflows/build-lkm.yml -> ddk-lkm.yml，身份常量来自
+# kernel/Kbuild 的项目默认值），但为了让下载到的源码快照在没有 Rust/DDK 工具链时也能直接出包，
+# 构建产物随仓库分发，故对下列文件显式放行。
+# 当前 aarch64 的 ko 仍是「上游 v3.3.0 产物 + 两处常量等长替换」的回退交付（见
+# docs/root-crown-appid-fix.md）；用路径 A 构建后可换成带 KSU_MANAGER_PACKAGE 包名校验的同名资产。
 **/*.ko
 **/ksuinit
 !aarch64/android15-6.6_kernelsu.ko

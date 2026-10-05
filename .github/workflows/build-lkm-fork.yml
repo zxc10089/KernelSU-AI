@@ -1,0 +1,49 @@
+# 本分支自有的 LKM 构建触发器。上游的 .github/workflows/build-lkm.yml / ddk-lkm.yml 保持原样不动，
+# 这里只调用上游的可复用工作流构建本机需要的单一 KMI，并把产物提交回仓库（只读/MCP 客户端拿不到
+# Actions 产物，只能把文件提交进仓库再取回）。
+#
+# 身份常量不在参数里传：kernel/Kbuild 已把项目私钥（0x342 / ca40af…）与包名 me.weishu.kernelsu.hide
+# 写成默认值，因此上游工作流里的 `make` 直接产出正确身份；需要别的身份时用 `make KSU_*=…` 覆盖。
+name: Build fork LKM (android15-6.6)
+
+on:
+  push:
+    branches:
+      - master
+      - ci-lkm-identity
+    paths:
+      - 'kernel/**'
+      - '.github/workflows/build-lkm-fork.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/ddk-lkm.yml
+    with:
+      kmi: android15-6.6
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download built module
+        uses: actions/download-artifact@v7
+        with:
+          name: aarch64-android15-6.6-lkm
+          path: ci-out
+      - name: Publish to ci/lkm branch
+        run: |
+          set -eux
+          ls -la ci-out
+          sha256sum ci-out/*
+          mkdir -p ci-artifacts/aarch64
+          cp ci-out/* ci-artifacts/aarch64/android15-6.6_kernelsu.ko
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git checkout -b ci/lkm
+          git add -f ci-artifacts
+          git commit -m "ci: build android15-6.6_kernelsu.ko from source (Kbuild identity)"
+          git push --force origin ci/lkm
