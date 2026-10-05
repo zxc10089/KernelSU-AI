@@ -147,11 +147,11 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 
 **路径 A 已落地（2026-10-05）**：`.github/workflows/build-lkm-fork.yml` 触发的 DDK CI（run `37305609190`，`Build kernelsu.ko for android15-6.6` 全绿）产出源码构建的 ko，经 `_tools/adopt-lkm-asset.ps1 -Ko <built.ko> -Verify` 收编为内置资产：
 
-- `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`：**315,280 字节**，sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`，含 `me.weishu.kernelsu.hide` 字符串（= `KSU_MANAGER_PACKAGE` 已编译进内核模块，包名校验生效）；同一 CI 产物在 `ci/lkm` 分支留档。
+- `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`：**315,280 字节**，sha256 `105ec969f2697459e9f8a9f14d643fc1ba58dbf3660200d08c877bca10b3e374`，含 `me.weishu.kernelsu.hide` 字符串（= `KSU_MANAGER_PACKAGE` 已编译进内核模块，包名校验生效）；同一 CI 产物在 `ci/lkm` 分支留档。
 - 被替换的路径 B 产物归档到 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`（sha256 `d537e0d7…c9178`）。
 - vermagic 四种 ko 副本完全一致（`6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64`），所以源码构建与设备上已在跑的回退产物一样可加载。
 
-**全矩阵已补齐（2026-10-05）**：run `37312303026`（master `85d4955`）把上游 8 个 KMI × 2 个 ABI 全跑绿，16 个产物逐个经 `_tools/adopt-lkm-asset.ps1 -Abi <abi> -Kmi <kmi>` 校验身份后收编进 `userspace/ksud/bin/`；本机设备是 android15-6.6，它的那一份与上面 315,280 字节的产物逐字节相同。逐项字节数与 sha256 见 `docs/upstream-alignment.md` 第 7 节。
+**全矩阵已补齐（2026-10-05）**：run `37312303026`（master `85d4955`）把上游 8 个 KMI × 2 个 ABI 全跑绿（首轮产物带 `-DKSU_VERSION=16`，同日由 run `37324382993` 重建为 32601 并整体替换），16 个产物逐个经 `_tools/adopt-lkm-asset.ps1 -Abi <abi> -Kmi <kmi>` 校验身份后收编进 `userspace/ksud/bin/`；本机设备是 android15-6.6，它的那一份与上面 315,280 字节的产物逐字节相同。逐项字节数与 sha256 见 `docs/upstream-alignment.md` 第 7 节。
 
 **路径 B（回退，本机无 DDK 容器时的应急方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的——只靠「私钥证书唯一」达到同等效果：
 

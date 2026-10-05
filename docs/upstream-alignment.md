@@ -100,28 +100,30 @@ endif
 
 ## 7. 收口结果（2026-10-05 已完成）
 
-- 源码产物已上线：DDK CI（`build-lkm-fork.yml`，run `37305609190`，KMI `android15-6.6`）产出的 ko 经 `_tools/adopt-lkm-asset.ps1 -Verify` 收编，`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko` = **315,280 字节 / sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`**，含 `me.weishu.kernelsu.hide`（路径 A）。回退产物归档在 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`。
+- 源码产物已上线：DDK CI（`build-lkm-fork.yml`，run `37305609190`，KMI `android15-6.6`）产出的 ko 经 `_tools/adopt-lkm-asset.ps1 -Verify` 收编，`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko` = **315,280 字节 / sha256 `105ec969f2697459e9f8a9f14d643fc1ba58dbf3660200d08c877bca10b3e374`**，含 `me.weishu.kernelsu.hide`（路径 A；首发批次带 `-DKSU_VERSION=16`，同日已由 run `37324382993` 的重建产物替换，见下条）。回退产物归档在 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`。
 - `libksud.so`（arm64-v8a / x86_64）与 release APK 已按新资产重建；`_tools/verify-identity.ps1 -RequireSourceBuild` 把「资产必须源自源码构建」变成可执行闸门（路径 B 直接 FAIL）。`_tools/verify-init-boot.py` 为引导镜像提供独立复核（自带解析器，不共用 producer 代码）。
-- **全矩阵已上线（2026-10-05）**：`build-lkm.yml` 的 8-KMI 矩阵由 `build-lkm-fork.yml` 触发（run `37312303026`，master `85d4955`，8 个矩阵任务 + publish 全绿），16 个产物逐个经 `_tools/adopt-lkm-asset.ps1 -Abi <abi> -Kmi <kmi>` 校验身份后收编进 `userspace/ksud/bin/`，`docs/DEVELOPMENT.md` 第 447 行记录的「单一 KMI」脆弱性随之关闭（slot/keystore/v2-only 三条仍成立）。
+- **全矩阵已上线（2026-10-05）**：`build-lkm.yml` 的 8-KMI 矩阵由 `build-lkm-fork.yml` 触发（首轮 run `37312303026`，master `85d4955`，8 个矩阵任务 + publish 全绿），16 个产物逐个经 `_tools/adopt-lkm-asset.ps1 -Abi <abi> -Kmi <kmi>` 校验身份后收编进 `userspace/ksud/bin/`，`docs/DEVELOPMENT.md` 第 447 行记录的「单一 KMI」脆弱性随之关闭（slot/keystore/v2-only 三条仍成立）。
 - **身份闸门修掉两个真坑**：DER 长度的比较指令寄存器是编译器选择——aarch64 多数 KMI 是 `cmp w21,#834`，android12-5.10 编成 `cmp w8,#834`；x86_64 的立即数位置随寻址方式变（`cmpl $834, %r12d` 与 `cmpl $834, 8(%rsp)`）。旧工具按字节硬匹配 `bfee0c71`/`0xA864`，会把 android12-5.10 误判失败、也可能误判通过。现在 `_tools/identity-lib.ps1` 以 `(w & 0x7F80001F) == 0x7100001F` 收集全部 wzr 比较再比对长度，x86_64 改用 llvm-objdump 反汇编；`patch-init-boot.py` 的 `--signer-size` 也改为「按 `--from-size` 唯一命中」定位并保留原寄存器编码。
+
+- **驱动版本随 pin 重建（2026-10-05）**：首轮产物「证书与包名都正确，但 `-DKSU_VERSION=16`」，管理器首页因此报「驱动版本 16 过低」。`kernel/Kbuild` 改为按「显式 `KSU_VERSION_CODE` > `manager/gradle.properties` > git 计数 > 16」取版本后，同一工作流重跑（run `37324382993` @ `993a080c`，8/8 矩阵 + publish 全绿），16 个产物逐个用 `_tools/identity-lib.ps1` 的 `Find-KsuVersion` 从反汇编读出 `version=32601`，再由 `_tools/adopt-lkm-asset.ps1` 整体替换；下表为新产物的哈希。
 
 | ABI | KMI | 字节 | sha256 |
 | --- | --- | ---: | --- |
-| aarch64 | android12-5.10 | 350160 | `cdc3dd5a70046896fcd2e7f4bb5c7105789193312081e4da085e9417384ef296` |
-| aarch64 | android13-5.10 | 346176 | `2a3e88de09281901f0fdd34984199d43adcca3b827352e384ef3feff75c34dd3` |
-| aarch64 | android13-5.15 | 374256 | `5774e5837a56d49307e4d1016158e3f90b905507af4172e78aec556cab9d2573` |
-| aarch64 | android14-5.15 | 469976 | `89b4af077b4c11a62be50f3650df4672e2fcf828d7493969307fbf168a050ab0` |
-| aarch64 | android14-6.1 | 386896 | `a54e1fb9db18170fcf088daf83160da8c62c63a68117d68e3a401e7f44333b8e` |
-| aarch64 | android15-6.6 | 315280 | `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040` |
-| aarch64 | android16-6.12 | 386600 | `b37651ac4d20af494315caba863b68a4eaa9e9229b78a9de412723cfffa61fa8` |
-| aarch64 | android17-6.18 | 357280 | `5e2705fb895b736225bbd70f0c858983768b1eabe95d7d6dcff3260a109c5054` |
-| x86_64 | android12-5.10 | 204152 | `3cdcf8b91d90e5905695130420138b618a01b4cf9e2fd29d6a6853d55df43151` |
-| x86_64 | android13-5.10 | 206448 | `28657fe859c1f0890e1a67ef7fb4cb9e9cbc95e39a5b67568af0c7bc10eb11f8` |
-| x86_64 | android13-5.15 | 205232 | `b5886e564c003eeeb2b03abe2f6b0a1faed46975a9a838bbbee3450825cdf544` |
-| x86_64 | android14-5.15 | 223912 | `0bfbeadaff07c814a54e6ca7e3d0882ef0be0f944b769de371c252bead4e0e83` |
-| x86_64 | android14-6.1 | 237056 | `875b97ee905702e3d46b384cd1bc871e3bc52d06a2f632831045facf6ad7b07b` |
-| x86_64 | android15-6.6 | 318896 | `6ad59a410a38a79275c669a0e114e25a11b17f7ba85167a245d5ca102079f33e` |
-| x86_64 | android16-6.12 | 341680 | `6238983f2e12e2c71329e19cb33d54f542d48016f9f01ebf6d73ebb4981d25fd` |
-| x86_64 | android17-6.18 | 409792 | `2b3e086a033d10b72d870e4693c481dcb05d5a35afdc5f59b34f4578212ba5e7` |
+| aarch64 | android12-5.10 | 350160 | `edc3fa011bf44a3300421e5cd892d8ff7b70d31868e5ed80a6e178f102141b9f` |
+| aarch64 | android13-5.10 | 346176 | `fb62b51f4bbf5cdcf6d466a53867e7c93c0109e670d4e4d26218eef97039023f` |
+| aarch64 | android13-5.15 | 374256 | `d49add3b64591ca152166f41d706724defdab02a7103d946b32add3c2d117575` |
+| aarch64 | android14-5.15 | 469976 | `6503a50e8b8a4c9455b9d2c0d53e512da1f371c6941c8837293736bf3a06c568` |
+| aarch64 | android14-6.1 | 386896 | `24b4a9e8383da19ffbeeafcbd9fdd7aeffcb9ba977dd4975f79ed569de208480` |
+| aarch64 | android15-6.6 | 315280 | `105ec969f2697459e9f8a9f14d643fc1ba58dbf3660200d08c877bca10b3e374` |
+| aarch64 | android16-6.12 | 386600 | `ef03735e73cd4be0cdc7f6c54d53af285363f47c9d7eb5eeb2df1d1aa6c87230` |
+| aarch64 | android17-6.18 | 357280 | `851e2e66fad9601abdf30b129468891e9cef2fb7acd695d7226b1b618f34f553` |
+| x86_64 | android12-5.10 | 204152 | `b8fc8854d40f55b04f50df28070cf908f4d1ffac95888bbbc130c616a5d3699f` |
+| x86_64 | android13-5.10 | 206448 | `1320471a0fca765cbed2fe663eb190abd0fd13f34848989fed5bd8c629532643` |
+| x86_64 | android13-5.15 | 205232 | `f1c08297fdab1db4888dc9cb3c142e6742ff8f992534e011d93db8d37222c99d` |
+| x86_64 | android14-5.15 | 223912 | `1feb1ada1da507cddbf9ce6ce9a504ef90ae35e76a807d90f3b66b2c9999b202` |
+| x86_64 | android14-6.1 | 237056 | `0da68e4f7935fa96b66d31cda2108d9fff2112aaac8f5c472c6fbee197c2bc7b` |
+| x86_64 | android15-6.6 | 318896 | `4f98a80ef08ec7e8ebadfe41c703b48972d78aff7123bb0c6f840ef17a4bdcce` |
+| x86_64 | android16-6.12 | 341680 | `46002448c3da6b653ac566a64db6cde81962b61365ce1553ea2a125ac56a52cd` |
+| x86_64 | android17-6.18 | 409792 | `81b659fe31fb5a1bb20a6d086bcc5ca080ccf71a41048472a5dfab46365a711f` |
 
-表内 16 个文件的 sha256 与 `ci/lkm` 上的产物一致（`git blob` 亦逐个核对），`_tools/verify-identity.ps1 -RequireSourceBuild` 对全部 16 个报 PASS。
+表内 16 个文件的 sha256 与 `ci/lkm` 上的产物一致（`git blob` 亦逐个核对），`_tools/verify-identity.ps1 -RequireSourceBuild` 对全部 16 个报 PASS；每个文件反汇编读出的驱动版本均为 32601（`_tools/identity-lib.ps1` 的 `Find-KsuVersion` 按指令形状定位常量，不依赖符号表）。
