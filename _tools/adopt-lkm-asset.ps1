@@ -30,6 +30,12 @@ param(
     [ValidateSet('aarch64', 'x86_64')][string]$Abi = 'aarch64',
     # Accept a path-B (byte-patched) module instead of requiring the package-name check.
     [switch]$AllowPatchedAsset,
+    # Version the candidate must carry. Empty = the pin in manager/gradle.properties. Only the
+    # compiled driver version matters: the manager refuses anything below MINIMAL_SUPPORTED_KERNEL.
+    [int]$ExpectedVersion = 0,
+    # Adopt anyway when the version is unreadable or differs. Refusing is the default because CI
+    # shipped 16 for weeks while the workflow itself looked correct.
+    [switch]$AllowVersionMismatch,
     # Validate only: do not copy anything into the tree.
     [switch]$DryRun,
     # Run _tools/verify-identity.ps1 after adopting.
@@ -109,6 +115,30 @@ if ($pathA) {
     Warn2 'candidate has NO package-name check (path B, byte-patched constants)' "a signer match alone decides the crown; pass without -AllowPatchedAsset to refuse this"
 } else {
     Check 'candidate carries the compiled-in package name' $false "'$ExpectedPackage' x$nPkg -- this is a path-B asset; re-run with -AllowPatchedAsset to accept it deliberately"
+}
+
+# 5. Compiled-in driver version. The version comes from kernel/Kbuild: an explicit KSU_VERSION_CODE
+# wins, then manager/gradle.properties, then the git commit count, and only if all of those fail does
+# it fall back to 16 -- which the manager rejects outright. Anchored on the real instruction shape, so
+# a stale artifact cannot pass by accident.
+$pinnedVer = Get-PinnedKsuVersion -PropsPath (Join-Path $ws 'manager\gradle.properties')
+$wantVer = $pinnedVer
+if ($ExpectedVersion -gt 0) { $wantVer = [int]$ExpectedVersion }
+$candVer = Find-KsuVersion -Path $Ko
+if ($null -eq $wantVer) {
+    Warn2 'no pinned KSU_VERSION_CODE' ('add one to ' + (Join-Path $ws 'manager\gradle.properties'))
+} elseif ($null -eq $candVer.Ok) {
+    if ($AllowVersionMismatch) { Warn2 'candidate driver version not readable' ("$($candVer.Why) -- accepted because -AllowVersionMismatch") }
+    else { Check 'candidate driver version is readable' $false ("$($candVer.Why) -- pass -AllowVersionMismatch only if you really cannot disassemble it") }
+} elseif (-not $candVer.Ok) {
+    if ($AllowVersionMismatch) { Warn2 'candidate driver version not found' ("$($candVer.Why) -- accepted because -AllowVersionMismatch") }
+    else { Check 'candidate carries a recognisable driver version' $false "$($candVer.Why) -- rebuild it with the pinned kernel/Kbuild" }
+} elseif ([int]$candVer.Version -ne [int]$wantVer) {
+    if ($AllowVersionMismatch) { Warn2 'candidate driver version differs from the required one' ("version=$($candVer.Version) want=$wantVer -- accepted because -AllowVersionMismatch") }
+    else { Check 'candidate driver version equals the required one' $false ("version=$($candVer.Version) (want $wantVer) -- this module was built without manager/gradle.properties; do not adopt it") }
+} else {
+    Write-Host ('[PASS] candidate driver version = {0}' -f $wantVer)
+    Write-Host ('       {0}' -f $candVer.Found)
 }
 
 if ($fails -gt 0) { Write-Host ''; Write-Host ('ADOPT: REFUSED ({0} failure(s))' -f $fails); exit 1 }

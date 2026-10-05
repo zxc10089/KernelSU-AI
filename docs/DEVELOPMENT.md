@@ -71,7 +71,16 @@
 
 > 2026-10-05 实测教训：白名单若用**公开**的 Android debug 证书，设备上任何同样用 debug key 签名的应用都能竞争加冕。真机上 `moe.nb4a.debug`（uid 10523）抢先拿走王冠，管理器此后永远拿不到 root 授权（`perm.c` 的 `allowed_for_su()` 只看 `is_manager()`）。因此白名单必须是项目私钥，且编译 ko 时应同时定义 `KSU_MANAGER_PACKAGE`。完整根因、补丁与刷机步骤见 `docs/root-crown-appid-fix.md`。
 
-### 3.2 补丁 LKM 与内置资产
+### 3.2 驱动版本必须与管理器一致
+
+加冕看证书，能不能用看版本：`manager\app\src\main\java\me\weishu\kernelsu\Natives.kt` 的 `MINIMAL_SUPPORTED_KERNEL = 32513` 与 `requireNewKernel()` 决定首页红条「管理器版本 (32601) 与 KernelSU 驱动版本 (16) 不匹配」。
+
+驱动版本由 `kernel/Kbuild` 编译进 `do_get_info()`。原实现只在 git 可用时取 `30000 + git rev-list --count HEAD`，否则回退 `-DKSU_VERSION=16`；而 CI 的 `actions/checkout@v7` 没有 `fetch-depth: 0`，`ddk-lkm.yml` 里的 `safe.directory` 又写死上游路径（`/__w/KernelSU/KernelSU`，本仓库实际在 `/__w/KernelSU-AI/KernelSU-AI`），git 判定失败 —— 2026-10-05 发布的 16 个模块因此全部带 16。即便 git 可用，本分支只有 23 个提交，`30000+23 = 30023` 依旧低于 32513。
+
+现在 `kernel/Kbuild` 按「显式 `KSU_VERSION_CODE` > `manager/gradle.properties` > git 计数 > 16」取值，CI 与本地读同一个文件（`KSU_VERSION_CODE=32601`），上游工作流无需传参。`_tools/identity-lib.ps1` 的 `Find-KsuVersion` 直接从反汇编里把该常量读出来，因此 `_tools/verify-identity.ps1` 第 5 节能要求每个内置资产等于 pin，`_tools/adopt-lkm-asset.ps1` 也会拒绝版本不符的候选模块。
+
+### 3.3 补丁 LKM 与内置资产
+
 
 内核期望常量有两条改写路径：
 

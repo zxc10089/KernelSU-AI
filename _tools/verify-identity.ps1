@@ -91,6 +91,32 @@ if ($SelfTest) {
     Check "classifier PASSES a correctly-built daemon" $okGood "fork=$($g.Fork) bareUpstream=$($g.BareUp)"
     Check "classifier FAILS the stock daemon" $okBad "fork=$($b.Fork) bareUpstream=$($b.BareUp)"
     Write-Host ""
+    # Version-locator controls. A PASS on the real gate means nothing unless the locator can both
+    # READ a version and be driven to refuse one, so exercise it against real bytes and a real
+    # properties file. (A module built by the broken Kbuild reports 16 -- that is the failure mode.)
+    . (Join-Path $PSScriptRoot 'identity-lib.ps1')
+    $tmpA = Join-Path $env:TEMP ('ksu-props-' + [guid]::NewGuid().ToString('N') + '.properties')
+    Set-Content -LiteralPath $tmpA -Value @('KSU_PACKAGE_NAME=me.weishu.kernelsu.hide', 'KSU_VERSION_CODE=32601', 'KSU_VERSION_NAME=v3.3.0+main') -Encoding ASCII
+    $tmpB = Join-Path $env:TEMP ('ksu-props-' + [guid]::NewGuid().ToString('N') + '.properties')
+    Set-Content -LiteralPath $tmpB -Value @('KSU_PACKAGE_NAME=me.weishu.kernelsu.hide') -Encoding ASCII
+    $pinned = Get-PinnedKsuVersion -PropsPath $tmpA
+    $unpinned = Get-PinnedKsuVersion -PropsPath $tmpB
+    Remove-Item -LiteralPath $tmpA, $tmpB -Force
+    Check "version pin is read from a properties file" ($pinned -eq 32601) "got '$pinned' (want 32601)"
+    Check "a properties file without the pin returns null" ($null -eq $unpinned) "got '$unpinned'"
+    $probeRoot = Join-Path $ws 'userspace\ksud\bin'
+    $probe = @()
+    if (Test-Path $probeRoot) { $probe = Get-ChildItem -Path $probeRoot -Recurse -Filter '*_kernelsu.ko' -File -ErrorAction SilentlyContinue }
+    if ($probe.Count -eq 0) {
+        Warn "no module to exercise the version locator" $probeRoot
+    } else {
+        foreach ($a in $probe) {
+            $v = Find-KsuVersion -Path $a.FullName
+            $rel = $a.FullName.Substring($ws.Length + 1)
+            Check "locator extracts a plausible version from a real module" ($v.Ok -eq $true -and [int]$v.Version -ge 1 -and [int]$v.Version -le 400000) "$rel version=$($v.Version) flags=0x$('{0:X}' -f $v.Flags)"
+        }
+    }
+    Write-Host ""
     if ($script:fail -gt 0) { Write-Host "SELF-TEST: FAILED"; exit 1 }
     Write-Host "SELF-TEST: PASSED"
     exit 0
@@ -292,6 +318,34 @@ if ($assets.Count -eq 0) {
             Warn "LKM asset is a byte-patched fallback (no compiled package name)" "$rel -- adopt a DDK CI build: _tools/adopt-lkm-asset.ps1 -Ko <built.ko>"
         }
         Write-Host ("       {0} size={1} sha256={2}" -f $rel, $bytes.Length, $sha)
+    }
+}
+
+Write-Host ""
+Write-Host "=== 5. LKM driver version (the manager refuses a module that is not the pinned build) ==="
+# The version is compiled into do_get_info(), so it is read back out of the instruction that loads
+# the {version, flags} pair (see Get-ImmediateVersionCandidates / the literal-pool path in
+# identity-lib.ps1). A module built without the pin falls back to -DKSU_VERSION=16 -- exactly what CI
+# shipped on 2026-10-05 -- and the manager then shows a "manager 32601 vs driver 16 version
+# mismatch" banner and refuses to work (Natives.kt MINIMAL_SUPPORTED_KERNEL = 32513). Check the BINARY, not
+# the workflow: the workflow looked correct while every artifact carried 16.
+$pinned = Get-PinnedKsuVersion -PropsPath (Join-Path $ws 'manager\gradle.properties')
+if ($null -eq $pinned) {
+    Warn "manager/gradle.properties has no KSU_VERSION_CODE" (Join-Path $ws 'manager\gradle.properties')
+} elseif ($assets.Count -eq 0) {
+    Warn "no LKM asset to version-check" $assetRoot
+} else {
+    Write-Host ("       pinned KSU_VERSION_CODE={0}" -f $pinned)
+    foreach ($asset in $assets) {
+        $rel = $asset.FullName.Substring($ws.Length + 1)
+        $ver = Find-KsuVersion -Path $asset.FullName
+        if ($null -eq $ver.Ok) {
+            Warn "LKM driver version not readable" "$rel -- $($ver.Why)"
+        } elseif (-not $ver.Ok) {
+            Check "LKM driver version equals the pinned $pinned" $false "$rel -- $($ver.Why); update _tools/identity-lib.ps1 for the new instruction shape"
+        } else {
+            Check "LKM driver version equals the pinned $pinned" ([int]$ver.Version -eq [int]$pinned) "$rel version=$($ver.Version) flags=0x$('{0:X}' -f $ver.Flags) via $($ver.Found)"
+        }
     }
 }
 

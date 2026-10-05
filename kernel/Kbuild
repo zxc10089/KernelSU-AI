@@ -111,17 +111,52 @@ $(warning -- KernelSU: Git not detected, make sure git is installed in your PATH
 endif
 
 
-# Calculate version if git version is available
+# ------------------------------------------------------------------------------------------------
+# Fork version identity. This tree is an upstream source SNAPSHOT: its local git history is 23
+# commits, so the git-derived scheme below can only produce 30000 + 23 = 30023, far under the
+# manager's hard gate (manager Natives.MINIMAL_SUPPORTED_KERNEL = 32513). The manager pins its own
+# identity in manager/gradle.properties (KSU_VERSION_CODE=32601) for exactly that reason, so the
+# LKM reads the SAME value here: kernel/driver and manager agree by construction.
+#
+# This is not theoretical. The CI LKM matrix (.github/workflows/build-lkm-fork.yml -> upstream
+# ddk-lkm.yml) checked this repo out at /__w/KernelSU-AI/KernelSU-AI while the workflow's
+# `git config --global --add safe.directory` names upstream's /__w/KernelSU/KernelSU, so git
+# detection inside the DDK container failed silently and all 16 published modules were built with
+# the hardcoded fallback -DKSU_VERSION=16 (measured by disassembling
+# userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko: do_get_info stores version 16, flags 1).
+#
+# Precedence: explicit KSU_VERSION_CODE (make or env) > manager/gradle.properties > git > 16.
+# ------------------------------------------------------------------------------------------------
+ifndef KSU_VERSION_CODE
+# Two readers, because the build environment varies: sed when a POSIX shell is available (the CI
+# DDK containers), make's own $(file <) otherwise (no shell needed at all). $(wildcard) guards
+# both, so a missing file falls through to the git/16 path instead of breaking the build.
+KSU_VERSION_PROPS := $(wildcard $(MDIR)../manager/gradle.properties)
+ifneq ($(KSU_VERSION_PROPS),)
+KSU_VERSION_CODE := $(shell sed -n 's/^KSU_VERSION_CODE=\([0-9][0-9]*\).*/\1/p' "$(KSU_VERSION_PROPS)" 2>/dev/null)
+ifeq ($(KSU_VERSION_CODE),)
+KSU_VERSION_CODE := $(patsubst KSU_VERSION_CODE=%,%,$(filter KSU_VERSION_CODE=%,$(file <$(KSU_VERSION_PROPS))))
+endif
+endif
+endif
+
+ifneq ($(KSU_VERSION_CODE),)
+$(eval KSU_VERSION=$(KSU_VERSION_CODE))
+$(info -- KernelSU version: $(KSU_VERSION) (pinned: manager/gradle.properties))
+else
 ifdef KSU_GIT_VERSION_VALID
 # ksu_version: major * 10000 + git version + 200 for historical reasons
 $(eval KSU_VERSION=$(shell expr 30000 + $(KSU_GIT_VERSION)))
 $(info -- KernelSU version: $(KSU_VERSION))
-ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
 else
-# If there is no .git directory, use default version
+# If there is no .git directory and no pinned version, use the upstream default
 $(warning "KSU_GIT_VERSION not defined! It is better to make KernelSU a git repository!")
-ccflags-y += -DKSU_VERSION=16
+$(warning "and no pinned KSU_VERSION_CODE was found in manager/gradle.properties")
+$(eval KSU_VERSION=16)
 endif
+endif
+
+ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
 
 KSU_NEW_DCACHE_FLUSH := $(shell grep -q __flush_dcache_area $(srctree)/arch/arm64/include/asm/cacheflush.h ; echo $$?)
 $(info -- KSU_NEW_DCACHE_FLUSH: $(KSU_NEW_DCACHE_FLUSH))

@@ -86,6 +86,18 @@ endif
 
 这与上游给自己写死官方身份（`0x033b` / `c371061b…`）的做法一致，只是值换成本项目的：上游 CI 因此无需任何改动即可构建本分支的 ko。用 `make KSU_EXPECTED_SIZE=… KSU_EXPECTED_HASH=… KSU_MANAGER_PACKAGE=…` 仍可覆盖。
 
+同一文件里驱动版本也收口到 `manager/gradle.properties`（2026-10-05 新增，见 `docs/DEVELOPMENT.md` 3.2）：
+
+```make
+ifndef KSU_VERSION_CODE
+KSU_VERSION_PROPS := $(wildcard $(MDIR)../manager/gradle.properties)
+KSU_VERSION_CODE := $(shell sed -n 's/^KSU_VERSION_CODE=\([0-9][0-9]*\).*/\1/p' "$(KSU_VERSION_PROPS)" 2>/dev/null)
+KSU_VERSION_CODE := $(patsubst KSU_VERSION_CODE=%,%,$(filter KSU_VERSION_CODE=%,$(file <$(KSU_VERSION_PROPS))))
+endif
+```
+
+第二行是 `sed` 不可用时的回退（GNU make 自带 `$(file <…)`），因此上游 CI 里「shallow checkout + 写死 safe.directory」导致的 git 判定失败不再影响版本：产物里的 `-DKSU_VERSION` 与 APK/管理器版本恒等。
+
 ## 7. 收口结果（2026-10-05 已完成）
 
 - 源码产物已上线：DDK CI（`build-lkm-fork.yml`，run `37305609190`，KMI `android15-6.6`）产出的 ko 经 `_tools/adopt-lkm-asset.ps1 -Verify` 收编，`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko` = **315,280 字节 / sha256 `00bcca544e8115c9fea3e70d39ed29316e93b887468970a04cb7af2918cc3040`**，含 `me.weishu.kernelsu.hide`（路径 A）。回退产物归档在 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`。
