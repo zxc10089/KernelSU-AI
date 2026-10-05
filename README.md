@@ -120,9 +120,6 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 ## 已知缺口
 
-- 对抗性验收有两个检测器未取得有效判定：Luna 停在「等待授权」后报 `Get Luna Version error`（其授权服务不可达，设备联网与 INTERNET 权限均正常）；春秋检测启动即弹出不可关闭的「发现新版本」对话框（无取消/关闭，返回键与点击遮罩均无效），其异常清单未能逐条展开。MT 管理器为人工比对工具，本身没有自动判定。
-- 环境隐藏页「重启」按钮在 late-load 模式下会丢弃软重启偏好：确认框的 `onConfirm = { reboot() }` 未携带 `reason`，因此该路径总是硬重启。修法与影响范围见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) 第 9 节。
-- `ksud soft-reboot` 只重启用户态，内核 uptime 不归零、界面表现弱，使用者容易误判为「点了没反应」。
 - `userspace/ksud/bin/x86_64/` 缺少 `_kernelsu.ko`：上游由 `ddk-lkm.yml` 在 Android DDK 容器里生成，本机没有该容器，因此 x86_64 设备上的 LKM 模式无法从本仓库的资产跑起来（x86_64 的 `ksuinit` 已随仓库分发）。
 
 逐项说明见 [docs/开发文档.md](docs/开发文档.md)。

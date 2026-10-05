@@ -10,7 +10,7 @@
     clippy::cast_possible_wrap,
     // 上游遗留：sepolicy.rs 的 derive(new) 展开会被新版 clippy 判为
     // redundant_field_names，lkm_image.rs 的历史断言写法会被判为
-    // assert_is_empty。两处都在上游文件里，本分支不重写上游实现，
+    // assert_is_empty。两处都在上游文件里，本分支不改动上游实现，
     // 因此整条放行；本分支新增代码不要依赖这两条。
     clippy::redundant_field_names,
     clippy::assert_is_empty
