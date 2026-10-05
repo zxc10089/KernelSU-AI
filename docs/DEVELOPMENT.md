@@ -90,7 +90,7 @@
 - `userspace/ksud/src/boot_patch.rs` 在给 GKI 镜像打补丁时同样按 `{kmi}_kernelsu.ko` 取 ko，并取 `ksuinit` 作为 init 载荷，最终把两者写进 cpio。
 
 当前内置的 ko 是打过补丁的版本：`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`（315176 字节，sha256 `eefc53db7e533a2de8c7968bd28adc276b1f7291e95fbdb8e760e62234b89f64`），其中本分支证书哈希位于文件偏移 112938，而官方哈希在整个文件中不存在。这可以用作「内置资产是否已换成我方版本」的判据。
-- 该 ko 与 `ksuinit` 随仓库分发（`userspace/ksud/bin/aarch64/`）：上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 注入的产物，本分支没有 CI，因此对这两个文件加了放行规则。`userspace/ksud/bin/x86_64/` 目前只有 `busybox`，没有 LKM 与 `ksuinit`。
+- 该 ko 与 `ksuinit` 随仓库分发（`userspace/ksud/bin/aarch64/`）：上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 注入的产物，本分支没有 CI，因此对这两个文件加了放行规则。`userspace/ksud/bin/x86_64/` 有 `busybox` 与按上游 ksuinit.yml 的静态链接 recipe 本机构建的 `ksuinit`（无动态依赖）；x86_64 的 `_kernelsu.ko` 由上游 `ddk-lkm.yml` 在 Android DDK 容器里生成，本机没有该容器，因此该架构的 LKM 模式缺少内置资产。
 
 后果：只要刷入或加载这个 ko，管理器身份即为本分支；换 keystore 或换 KMI 都需要重新补丁并重新内置。
 
