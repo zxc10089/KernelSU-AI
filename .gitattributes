@@ -7,3 +7,10 @@
 #   * _tools/hiding-props-module/*.sh are zipped verbatim into a KernelSU module, where
 #     the CR lands inside the shebang and every command line.
 *.sh text eol=lf
+
+# The props module's data files are also consumed verbatim on the device (not on
+# Windows): ksud parses module.prop, and resetprop parses props.txt as NAME=VALUE.
+# With core.autocrlf=true a fresh checkout would hand them CRLF, and the CR lands
+# *inside the value* rather than acting as a line ending -- version becomes
+# "v1.0.4\r" and the last property's value gains a stray CR.
+_tools/hiding-props-module/* text eol=lf

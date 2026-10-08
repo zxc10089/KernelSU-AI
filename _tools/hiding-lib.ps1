@@ -747,7 +747,13 @@ function Get-PropertyPlan {
         @{ Op = 'set'; Name = 'ro.kernel.qemu'; Value = '0'; Why = '报告 §4.1 反模拟器' }
         @{ Op = 'set'; Name = 'ro.boot.qemu'; Value = '0'; Why = '报告 §4.1 反模拟器' }
         @{ Op = 'set'; Name = 'ro.hardware.virtual_device'; Value = '0'; Why = '报告 §4.1 反模拟器' }
-        @{ Op = 'set'; Name = 'sys.usb.adb.disabled'; Value = '1'; Why = '报告 §4.1 ADB 痕迹' }
+        # 报告 §4.1 列了 sys.usb.adb.disabled=1，但**本机实测后决定不写**：真机现值 0，
+        # 且设备上没有任何模块写过它（即 0 就是原厂值）。强行改成 1 有两个独立风险：
+        #   1) 偏离原厂值本身就是一条比不改更容易被读到的痕迹；
+        #   2) 该属性在 OPPO 的 USB 栈里语义未知，若被 vendor 服务采信，可能关掉 USB ADB 接口
+        #      —— 而那正是本流水线唯一的控制与恢复通道。
+        # 因此这里降级为只读探查（与通配项同一机制），永不写入。
+        @{ Op = 'list'; Name = 'sys.usb.adb.disabled'; Why = '报告 §4.1 ADB 痕迹：**刻意不写**。真机现值 0 且无其他写入者（原厂值），改 1 既偏离原厂又可能关掉 USB ADB，故只列命中项。' }
         @{ Op = 'set'; Name = 'service.adb.root'; Value = '0'; Why = '报告 §4.1 ADB 痕迹' }
         @{ Op = 'set'; Name = 'service.adb.tcp.port'; Value = '-1'; Why = '报告 §4.1 ADB 痕迹（-1 = 关闭 tcp 调试）' }
         @{ Op = 'del'; Name = 'persist.service.adb.enable'; Why = '报告 §4.1 ADB 痕迹（删除）' }
@@ -1302,7 +1308,12 @@ function Invoke-HidingLibSelfTest {
 
         # ===== 9. 三个计划构造器：形状 + §7 红线兜底 =====
         $pp = Get-PropertyPlan
-        Assert-HidingTruth -Condition (@($pp).Count -eq 28) -Message ('Get-PropertyPlan 正控：应为 28 步（23 set + 4 del + 1 通配探查），实际=' + @($pp).Count)
+        # 真机实测后的硬闸，刻意放在最前：把这条降级决策改回 set 时，必须由它第一个点名，
+        # 不能被后面的计数断言遮住（计数断言同样会失败，但报错信息不会指向真因）。
+        # 理由：sys.usb.adb.disabled 真机现值 0 且无其他写入者，改 1 既偏离原厂值又可能
+        # 关掉 USB ADB —— 那是本流水线唯一的控制与恢复通道。
+        Assert-HidingTruth -Condition ((@($pp | Where-Object { $_.Command -match 'sys\.usb\.adb\.disabled' -and $_.Command -notmatch '\|\s*true$' })).Count -eq 0) -Message 'Get-PropertyPlan 负控：sys.usb.adb.disabled 只能出现在只读探查步里，不得有写入命令'
+        Assert-HidingTruth -Condition (@($pp).Count -eq 28) -Message ('Get-PropertyPlan 正控：应为 28 步（22 set + 4 del + 2 只读探查），实际=' + @($pp).Count)
         $ppBad = @($pp | Where-Object { $null -eq $_.Stage -or $null -eq $_.Name -or $null -eq $_.Command -or $null -eq $_.Why })
         Assert-HidingTruth -Condition ($ppBad.Count -eq 0) -Message 'Get-PropertyPlan 正控：每步都必须有 Stage/Name/Command/Why'
         Assert-HidingTruth -Condition ((@($pp | Where-Object { $_.Stage -ne 'S6' })).Count -eq 0) -Message 'Get-PropertyPlan 正控：Stage 必须都是 S6'
@@ -1312,7 +1323,7 @@ function Invoke-HidingLibSelfTest {
         Assert-HidingTruth -Condition ((@($pp | Where-Object { $_.Command -match 'resetprop -n -d persist\.com\.luckyzyx\.luckytool\.\*' })).Count -eq 0) -Message 'Get-PropertyPlan 负控：通配属性名不得被当成真实属性名去 delete'
         # 通配探查是"报告"，不是"动作"：grep 无命中时退出 1，而"没有这个痕迹"正是期望结果。
         # 必须显式吞掉退出码，否则将来把它接进执行器会把一台干净设备报成失败。
-        Assert-HidingTruth -Condition ((@($pp | Where-Object { $_.Name -like 'enumerate:*' })).Count -eq 1) -Message 'Get-PropertyPlan 正控：应恰有 1 步通配探查'
+        Assert-HidingTruth -Condition ((@($pp | Where-Object { $_.Name -like 'enumerate:*' })).Count -eq 2) -Message 'Get-PropertyPlan 正控：应恰有 2 步只读探查（通配项 + sys.usb.adb.disabled）'
         Assert-HidingTruth -Condition ((@($pp | Where-Object { $_.Name -like 'enumerate:*' -and $_.Command -notmatch '\|\s*true$' })).Count -eq 0) -Message 'Get-PropertyPlan 正控：通配探查步必须以 || true 收尾（退出码不得被当成一步失败）'
         $kp = Get-KeyboxPlan
         Assert-HidingTruth -Condition (@($kp).Count -eq 6) -Message ('Get-KeyboxPlan 正控：应为 6 步，实际=' + @($kp).Count)

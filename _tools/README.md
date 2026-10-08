@@ -27,7 +27,7 @@
 | `identity-lib.ps1` | 身份判据的共享实现（被 `adopt-lkm-asset.ps1` / `verify-identity.ps1` / `build-ksud.ps1` 点源加载）：`Find-LlvmObjdump` 找 NDK 的 objdump，`Find-ExpectedSize` 证明 ko 里的 DER 长度比较等于期望值——aarch64 按 `(w & 0x7F80001F) == 0x7100001F` 收集全部 wzr 比较（寄存器是编译器选择：多数 KMI 是 `w21`，android12-5.10 是 `w8`），x86_64 走反汇编匹配 `cmp $834`；`Find-KsuVersion` 从 `do_get_info` 的 `{version, flags}` 常量取驱动版本（aarch64 立即数 `str x<r>`、x86_64 `movabsq`，另有两个 KMI 走字面量池 + 重定位），`Get-PinnedKsuVersion` 读 `manager/gradle.properties` 的 pin；工具缺失时返回 `Ok=$null` 让调用方报警告而不是猜 |
 | `project-signer.json` | 项目签名身份的公开事实（证书 SHA-256、DER 长度等）；私钥与口令在 `.artifacts/builder/keystore/keystore.properties`，不入库 |
 | `hiding_manifest.schema.json` | 资源包 manifest 的契约（结构与管理器侧消费语义） |
-| `hiding-lib.ps1` | 隐藏流水线的纯函数库（只定义函数，无顶层副作用，无文件级 `param()`）：读并强校验 manifest、`Get-HidingRuntimeProfile` / `Get-HidingPlan`（逐字对应管理器 `HideEnvironmentViewModel.buildOneKeyPlan`）、`Match-KernelBranch`、`Read-FeatureConfig`（同时接受 versioned 与 plain 两种布局，且要求记录恰好填满文件）、`Get-PropertyPlan`（28 步：22 set + 5 del + 1 通配探查）、`Get-KeyboxPlan`（6 步固定序列）、`Get-CleanupPlan`、`Invoke-Adb` / `Invoke-AdbShell` / `Invoke-SuShell`；`Invoke-HidingLibSelfTest` 是它的自检（正控 + 负控，任一条不过即抛） |
+| `hiding-lib.ps1` | 隐藏流水线的纯函数库（只定义函数，无顶层副作用，无文件级 `param()`）：读并强校验 manifest、`Get-HidingRuntimeProfile` / `Get-HidingPlan`（逐字对应管理器 `HideEnvironmentViewModel.buildOneKeyPlan`）、`Match-KernelBranch`、`Read-FeatureConfig`（同时接受 versioned 与 plain 两种布局，且要求记录恰好填满文件）、`Get-PropertyPlan`（28 步：22 set + 4 del + 2 只读探查）、`Get-KeyboxPlan`（6 步固定序列）、`Get-CleanupPlan`、`Invoke-Adb` / `Invoke-AdbShell` / `Invoke-SuShell`；`Invoke-HidingLibSelfTest` 是它的自检（正控 + 负控，任一条不过即抛） |
 | `hiding-status.ps1` | 只读体检：设备身份、内核 release、本地 manifest 强校验、运行模式三态、`.feature_config` 解码、keybox 只探测存在性/字节数/sha256 前 8 位、检测器已装情况、逐条目 `installed/pending` 判定。`-Json` 输出单个对象；`-SelfTest` 离线自检。**未知一律渲染成 `?`，绝不把 `$null` 当 False** |
 | `hiding-onekey.ps1` | 一键隐藏编排。**默认（不带 `-Apply`）只打印计划，不碰设备**；`-Apply` 才执行，且进门先做 root 预检，不确定就 fail-closed。计划复用 `hiding-lib.ps1`，单步文案冻结为 `第 n/m 步 · <名称> · 成功\|失败:<原因>`，末行恒为 `需重启后生效`。可选 `-InstallLsposed` / `-AddBrickRescue` / `-InstallPropsModule` / `-KeyboxPath` / `-Detectors` / `-SkipModules` |
 | `hiding-props-module/` | 报告 §4.1 的 22 条属性洗白，做成常驻模块（`props.txt` + `post-fs-data.sh` + `service.sh` + `customize.sh`），由 `hiding-onekey.ps1 -InstallPropsModule` 打包安装 |
@@ -62,6 +62,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force   # 本机默�
 - **`-Apply` 进门先验 root**，验不过就一步都不写。模块 / pathmask 安装必需 root；检测器安装不需要（`pm install` 走 adb shell 即可）。
 - **`pm install` 的裁决是输出里出现独立一行 `Success`**，不是退出码——实测 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 时退出码也可能是 0。
 - **keybox.xml 只搬运、不读取**：设备侧只用 `test -s` / `chattr` / `chown` / `chmod` / `mv`，内容永不回显、永不进日志、永不进 APK 或 git。
+- **`sys.usb.adb.disabled` 刻意不写**：报告 §4.1 列了 `sys.usb.adb.disabled=1`，但真机实测该属性现值
+  为 0，且设备上**没有任何模块写过它**（即 0 就是原厂值）。改成 1 有两个独立风险：偏离原厂值本身
+  就是一条比不改更容易被读到的痕迹；该属性在该厂商 USB 栈里的语义未知，若被采信可能关掉 USB ADB
+  —— 而那是本流水线唯一的控制与恢复通道。因此它被降级成只读探查步（与通配项同一机制），
+  `hiding-lib.ps1` 里有一条负控断言保证它永远不会出现在写入命令里。
 - **不做报告 §4.5 的痕迹清理**（删用户存储里的 `*.img` / `*.json` / `*.xml` / `*.zip` / `MT2/`）——那是销毁用户数据，本工具永不代劳。
 
 ### 改这三个脚本时必须知道的坑
@@ -70,16 +75,43 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force   # 本机默�
   `.ps1` 按 ANSI 解码，文件里的中文会立刻变成乱码并**成片破坏字符串引号**，`ParseFile` 会报几十个
   其实是编码问题导致的语法错误。用编辑器改写后务必确认前三字节仍是 `EF BB BF`，并重新跑一次
   `ParseFile` + `-SelfTest`。
+  - **实测陷阱：定点替换（`edit` 这类 old→new 文本替换工具）会把 BOM 丢掉。** 每次改过这三个
+    文件后都必须重新验 BOM；丢了就补前三字节再存档。补的时候注意
+    `(New-Object System.Text.UTF8Encoding($true)).GetBytes($text)` **不会**写出前导 BOM
+    —— 那个 `true` 只让 `StreamWriter` 那条路径加 BOM，`GetBytes` 永远不加。要显式拼：
+    ```powershell
+    $enc  = New-Object System.Text.UTF8Encoding($false)
+    $body = $enc.GetBytes($text)
+    $out  = New-Object byte[] ($body.Length + 3)
+    $out[0] = 0xEF; $out[1] = 0xBB; $out[2] = 0xBF
+    [Array]::Copy($body, 0, $out, 3, $body.Length)
+    [System.IO.File]::WriteAllBytes($path, $out)
+    ```
+  - 反证（负控）也会踩这个坑：先用 `Copy-Item` 存一份**带 BOM** 的字节备份，否则回滚回来的仍是
+    无 BOM 版本，紧接着的自检会报一堆假的语法错误，让人误以为闸门坏了。
 - **计划构造器的返回形状**：`Get-PropertyPlan` / `Get-KeyboxPlan` 用 `return ,$steps`（整个数组作为
   单个对象返回，调用方 `foreach ($x in @($plan))`）；`Get-SecurityPatchPlan` / `Get-TargetListPlan`
   是**逐个输出**（调用方必须 `$plan = @(Get-... ...)` 快照）。不要互相改：把前者换成逐个输出、或把
   后者包成 `,$steps`，都会让空/单元素计划悄悄变成「包着真数组的 1 元素数组」，`@(cmd).Count` 恒为 1。
   另外空结果的断言必须写成内联 `@(cmd).Count`，先赋值再 `@($x).Count` 会得到 1（`@($null).Count`）。
 
-已知未验证项（如实记录）：端到端 `-Apply` 的模块安装、keybox 搬运、`security_patch` 写入与
-`target.txt` 安装路径**没有在真实有 root 的设备上跑过**；
-本机所连设备的 adb shell 取不到 `su`（`/system/bin/su` 等均不存在），因此只验证了 fail-closed 拒绝路径、
-dry-run 计划、以及不需要 root 的检测器安装路径。
+已知未验证项（如实记录，已随真机实测更新）：
+
+- **`hiding-onekey.ps1 -Apply` 这条编排本身仍未端到端跑过**，但设备侧被它调用的动作已在一台真机上
+  手工验证：`su -c '/data/adb/ksud module install <zip>'` 对 pathmask 与 AlwaysStrong 各跑一次（均以
+  `Module installed successfully!` 结束），随后 `adb reboot`（`sys.boot_completed=1` 约 15 s），复核
+  `/data/adb/modules_update/*` 已清空、`/data/adb/modules/pathmask` 生效、`pathmask.ko` 出现在
+  `/proc/modules`（`pathmask 159744 0 - Live`）。
+- **仍未在真机跑过**：`-InstallPropsModule`、`-KeyboxPath`（§4.4 的 S7 原子写入）、`-TargetListPath`、
+  `-SecurityPatchPath`，以及 `-Detectors` 的 `pm install`。
+- 所连设备本来就是完整隐藏栈（5 个模块 + AlwaysStrong + `selinux_hide=1` + 9/9 检测器），所以
+  「缺件安装」这条路径只在 pathmask 上真正被走过一次。
+- **对一台已配好的设备不要盲跑 `-Apply`**：它会重装 5 个已装模块，并且在给了对应 `-*Path` 时无条件
+  覆盖 `/data/adb/tricky_store/` 下活跃的 `keybox.xml`（13,280 B，与同目录 `hbk` / `.kb_engine` /
+  `boot_key.bin` / `persistent_keys/` 配套绑定）。实测 AlwaysStrong 自己的安装器会 `keybox kept
+  (13280 bytes)` 主动保留，但本工具给的 `-KeyboxPath` 没有这个保护。
+- **判定内核模块是否加载要等模块自己的目标等待窗过去**（pathmask 是 60 s）：窗口内读 `/proc/modules`
+  只看到 `hybridmount` / `kernelsu`，会把 `boot_state=waiting-targets` 误报成「ko 没加载」。
 
 ## 红线
 

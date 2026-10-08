@@ -42,6 +42,14 @@ ro.boot.qemu=0
 ro.hardware.virtual_device=0
 
 # ADB traces
-sys.usb.adb.disabled=1
+#
+# sys.usb.adb.disabled=1 is deliberately NOT written here. Measured on the real
+# device (OPPO PMA110): the live value is 0 and no module on the device writes it,
+# so 0 is the stock value. Forcing it to 1 would (a) diverge from stock -- itself
+# a readable trace -- and (b) possibly switch off the USB ADB interface on an
+# unknown vendor USB stack, and USB ADB is this pipeline's only control and
+# recovery channel. It is reported by _tools/hiding-status.ps1 instead of being
+# applied. This is not a silent skip: the omission is documented here and
+# asserted by a negative control in hiding-lib.ps1.
 service.adb.root=0
 service.adb.tcp.port=-1
