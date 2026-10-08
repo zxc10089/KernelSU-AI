@@ -203,17 +203,15 @@ $mods = @()
 $modulesAvailable = $false
 if ($mlRes.ExitCode -eq 0) {
     # 只用 stdout，并**从首个 '[' 切到末个 ']'**：ksud 可能在前面打印别的东西（日志/警告）。
+    # 解析本身交给库函数 ConvertFrom-HidingModuleList —— 它已修掉 PowerShell 5.1
+    # `@(ConvertFrom-Json ...)` 的包装陷阱（会把结果再包一层成 1 元素数组，
+    # 导致按 id 匹配全部落空、把所有已装模块误报成未装；真实踩过）。
     $raw = (@($mlRes.Output) -join "`n")
     $i0 = $raw.IndexOf('[')
     $i1 = $raw.LastIndexOf(']')
     if ($i0 -ge 0 -and $i1 -gt $i0) {
-        $jsonText = $raw.Substring($i0, $i1 - $i0 + 1)
-        try {
-            $mods = @(ConvertFrom-Json -InputObject $jsonText)
-            $modulesAvailable = $true
-        } catch {
-            Add-Note ("ksud module list 的 JSON 解析失败：" + $_.Exception.Message)
-        }
+        $mods = @(ConvertFrom-HidingModuleList -Text $raw)
+        $modulesAvailable = $true
     } else {
         Add-Note 'ksud module list 输出里没有 JSON 数组（未找到 [ ... ]）'
     }

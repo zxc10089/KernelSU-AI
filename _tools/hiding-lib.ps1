@@ -389,6 +389,35 @@ function Get-HidingPlan {
     Write-Output -NoEnumerate $sorted
 }
 
+function ConvertFrom-HidingModuleList {
+    <#
+    .SYNOPSIS
+        把 `ksud module list` 的原始输出解析成**扁平的**模块对象数组（失败返回 @()）。
+    .DESCRIPTION
+        * 只取 stdout，并从首个 '[' 切到末个 ']'（ksud 可能在前面打印别的行；
+          adb 的 "* daemon not running; starting now at tcp:5037" 也会混进 Output）。
+        * **绝对不能写 `@(ConvertFrom-Json -InputObject $json)`**：PowerShell 5.1 会把
+          该调用结果当成单个对象再包一层，得到 Count=1 且 [0] 是 Object[]；随后按 id
+          逐个匹配会全部落空，把所有已装模块误判成未装（真实踩过）。
+          必须先赋值、再用 foreach 展平。
+    .PARAMETER Text
+        `Invoke-SuShell`/`Invoke-AdbShell` 返回的 Output 拼接文本。
+    #>
+    param([string]$Text)
+    $result = @()
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $result }
+    $i0 = $Text.IndexOf('[')
+    $i1 = $Text.LastIndexOf(']')
+    if ($i0 -lt 0 -or $i1 -le $i0) { return $result }
+    try {
+        $parsed = ConvertFrom-Json -InputObject $Text.Substring($i0, $i1 - $i0 + 1)
+    } catch {
+        return $result
+    }
+    foreach ($item in $parsed) { if ($null -ne $item) { $result += $item } }
+    return $result
+}
+
 function Test-HidingEntryInstalled {
     <#
     .SYNOPSIS
@@ -1144,6 +1173,29 @@ function Invoke-HidingLibSelfTest {
         Assert-HidingTruth -Condition ($stDetNo.Installed -eq $false) -Message 'Test-HidingEntryInstalled 负控：包名不在清单里必须判未装'
         $stData = Test-HidingEntryInstalled -Entry @{ id = 'data-x'; category = 'data' } -Modules $mods
         Assert-HidingTruth -Condition ($stData.Installed -eq $false) -Message 'Test-HidingEntryInstalled 负控：data 类目恒为未装'
+
+        # ===== 5b. ConvertFrom-HidingModuleList：PS 5.1 `@(ConvertFrom-Json ...)` 包装陷阱的回归闸 =====
+        # 真实缺陷：hiding-status.ps1 曾写 `$mods = @(ConvertFrom-Json -InputObject $json)`。
+        # PS 5.1 把该调用结果当成**单个对象**再包一层 ⇒ Count=1 且 [0] 的类型是 Object[]；
+        # 于是 Get-HidingField 在数组上取不到 id ⇒ 按 id 匹配全部落空，
+        # 设备上真实存在的 5 个模块被误报成「设备上没有模块 id=hybrid_mount」。
+        $json3 = '[{"id":"hybrid_mount","versionCode":"602003302"},{"id":"zygisksu","versionCode":"817"},{"id":"tricky_store","versionCode":"104"}]'
+        $ml = ConvertFrom-HidingModuleList -Text $json3
+        Assert-HidingTruth -Condition (@($ml).Count -eq 3) -Message ("ConvertFrom-HidingModuleList 正控：3 元素 JSON 必须得 3 条，实际=" + @($ml).Count)
+        $ml0 = @($ml)[0]
+        Assert-HidingTruth -Condition ((Get-HidingField $ml0 'id') -eq 'hybrid_mount') -Message 'ConvertFrom-HidingModuleList 正控：首条 id 必须正确（不得被包成 1 元素数组）'
+        # 闸门本体：经 JSON 解析得到的列表喂给 Test-HidingEntryInstalled 必须判已装。
+        # 谁要是把实现改回 @(ConvertFrom-Json ...)，这条会立刻失败。
+        $mlInst = Test-HidingEntryInstalled -Entry @{ id = 'hybrid_mount'; moduleId = 'hybrid_mount'; category = 'module'; versionCode = 602003302 } -Modules $ml
+        Assert-HidingTruth -Condition ($mlInst.Installed -eq $true) -Message 'ConvertFrom-HidingModuleList 回归闸：JSON 解析出的模块列表必须能被判定为已装'
+        # 真实 Output 的首行是 adb 噪音 "* daemon not running; starting now at tcp:5037"，必须容忍。
+        $mlNoise = ConvertFrom-HidingModuleList -Text ("* daemon not running; starting now at tcp:5037`n" + $json3)
+        Assert-HidingTruth -Condition (@($mlNoise).Count -eq 3) -Message 'ConvertFrom-HidingModuleList 正控：必须容忍 ksud 之前的噪声行'
+        # 负控：任何不可解析输入都必须返回 @()（绝不抛错、绝不返回 $null）。
+        foreach ($bad in @('', '   ', 'no brackets here', '[not json', '[]')) {
+            $mlBad = ConvertFrom-HidingModuleList -Text $bad
+            Assert-HidingTruth -Condition (@($mlBad).Count -eq 0) -Message ("ConvertFrom-HidingModuleList 负控：非法输入必须得 0 条，输入=[" + $bad + "] 实际=" + @($mlBad).Count)
+        }
 
         # ===== 6. Read-FeatureConfig：真实 72 字节样本 + 负控 =====
         # 样本 = 只读资源包 D:\ai\隐藏环境资源包\.feature_config 的字节（72B；magic/version=1/count=5）：
