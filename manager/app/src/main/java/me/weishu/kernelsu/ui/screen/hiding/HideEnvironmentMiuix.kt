@@ -13,15 +13,19 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Rule
 import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Extension
@@ -31,7 +35,6 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -41,6 +44,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +54,7 @@ import me.weishu.kernelsu.data.model.HidingPackEntry
 import me.weishu.kernelsu.data.model.HidingRuntimeMode
 import me.weishu.kernelsu.data.repository.isSoftRebootPreferred
 import me.weishu.kernelsu.ui.component.rebootlistpopup.rememberRebootAction
+import me.weishu.kernelsu.ui.component.statustag.StatusTag
 import me.weishu.kernelsu.ui.theme.LocalEnableBlur
 import me.weishu.kernelsu.ui.util.BlurredBar
 import me.weishu.kernelsu.ui.util.rememberBlurBackdrop
@@ -128,15 +133,18 @@ fun HideEnvironmentPagerMiuix(
                 overscrollEffect = null,
             ) {
                 item {
+                    // The status card is read-only and true on every device, so it stays visible even
+                    // when the kernel cannot honour the switches; only the action cards are replaced.
+                    RuntimeModeBannerMiuix(uiState)
+                    EnvironmentStatusCardMiuix(uiState, actions)
                     if (!uiState.isFullFeatured) {
-                        UnsupportedCardMiuix(actions)
+                        UnsupportedCardMiuix()
                     } else {
-                        RuntimeModeBannerMiuix(uiState)
-                        EnvironmentStatusCardMiuix(uiState)
                         HidingSwitchesCardMiuix(uiState, actions)
                         OneKeyHideCardMiuix(uiState, actions)
                         QuickInstallCardMiuix(uiState, actions)
                         HidingPackCardMiuix(uiState, actions)
+                        RiskNoticeCardMiuix()
                     }
                     Spacer(Modifier.height(bottomInnerPadding))
                 }
@@ -146,7 +154,9 @@ fun HideEnvironmentPagerMiuix(
 }
 
 @Composable
-private fun UnsupportedCardMiuix(actions: HideEnvironmentActions) {
+private fun UnsupportedCardMiuix() {
+    // The app bar above already says 环境隐藏, so repeating it as the card header was pure
+    // duplication. The refresh entry moved into the status card, which renders in this state too.
     Card(
         modifier = Modifier
             .padding(top = 12.dp)
@@ -154,15 +164,18 @@ private fun UnsupportedCardMiuix(actions: HideEnvironmentActions) {
     ) {
         HeaderComponentMiuix(
             icon = Icons.Rounded.Warning,
-            title = stringResource(id = R.string.hide_environment),
-            summary = stringResource(id = R.string.hide_environment_unsupported)
+            title = stringResource(id = R.string.hide_environment_unsupported),
+            summary = null,
+            titleColor = colorScheme.primary
         )
-        RefreshPreference(actions.onRefresh)
     }
 }
 
 @Composable
-private fun EnvironmentStatusCardMiuix(uiState: HideEnvironmentUiState) {
+private fun EnvironmentStatusCardMiuix(
+    uiState: HideEnvironmentUiState,
+    actions: HideEnvironmentActions,
+) {
     val kernelSummary = listOf(uiState.androidRelease, uiState.kernelRelease)
         .filter { it.isNotBlank() }
         .joinToString(" | ")
@@ -175,7 +188,32 @@ private fun EnvironmentStatusCardMiuix(uiState: HideEnvironmentUiState) {
         HeaderComponentMiuix(
             icon = Icons.Rounded.Info,
             title = stringResource(id = R.string.hide_environment_status_title),
-            summary = stringResource(id = R.string.hide_environment_summary)
+            summary = stringResource(id = R.string.hide_environment_summary),
+            titleColor = colorScheme.primary
+        )
+        // The mode is stated once in the banner above and the licence at the end of the page, so
+        // neither is repeated here. The kernel release row carries the android/kernel summary that
+        // used to occupy a row of its own. Status rows only ever use the
+        // Info/CheckCircle/Warning/RestartAlt set; Security stays on the SELinux *switch*.
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_kernel_release),
+            summary = kernelSummary
+        )
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_kernel_uapi),
+            summary = uiState.kernelUapiVersion.toString()
+        )
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_manager_uapi),
+            summary = uiState.managerUapiVersion.toString()
+        )
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_selinux_status),
+            summary = uiState.selinuxStatus
         )
         // Boolean capabilities are only rendered when they hold; the repo has no yes/no string key.
         if (uiState.isFullFeatured) {
@@ -192,13 +230,6 @@ private fun EnvironmentStatusCardMiuix(uiState: HideEnvironmentUiState) {
                 summary = null
             )
         }
-        if (uiState.isLkmMode) {
-            HeaderComponentMiuix(
-                icon = Icons.Rounded.Extension,
-                title = stringResource(id = R.string.hide_environment_lkm_mode),
-                summary = null
-            )
-        }
         if (uiState.isLateLoadMode) {
             HeaderComponentMiuix(
                 icon = Icons.Rounded.RestartAlt,
@@ -206,35 +237,9 @@ private fun EnvironmentStatusCardMiuix(uiState: HideEnvironmentUiState) {
                 summary = null
             )
         }
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.SystemUpdate,
-            title = stringResource(id = R.string.hide_environment_kernel_uapi),
-            summary = uiState.kernelUapiVersion.toString()
-        )
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.SystemUpdate,
-            title = stringResource(id = R.string.hide_environment_manager_uapi),
-            summary = uiState.managerUapiVersion.toString()
-        )
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.Info,
-            title = stringResource(id = R.string.hide_environment_kernel_release),
-            summary = kernelSummary
-        )
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.Security,
-            title = stringResource(id = R.string.hide_environment_selinux_status),
-            summary = uiState.selinuxStatus
-        )
-        // The risk notice occupies ONE row: the disclaimer is the summary, while the
-        // keybox/private-key and APK-size lines are gone from the developer-facing view.
-        // hide_environment_risk_keybox / _size stay defined (renaming existing
-        // hide_environment* string keys is forbidden) but are intentionally not rendered any more.
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.BugReport,
-            title = stringResource(id = R.string.hide_environment_risk_title),
-            summary = stringResource(id = R.string.hide_environment_risk_license)
-        )
+        // The only refresh entry point inside the page: it used to hide at the bottom of the pack
+        // card, i.e. below the fold on a 360dp screen.
+        RefreshPreference(actions.onRefresh)
     }
 }
 
@@ -254,7 +259,8 @@ private fun HidingSwitchesCardMiuix(uiState: HideEnvironmentUiState, actions: Hi
         HeaderComponentMiuix(
             icon = Icons.Rounded.Settings,
             title = stringResource(id = R.string.hide_environment_switches_title),
-            summary = null
+            summary = null,
+            titleColor = colorScheme.primary
         )
         OverlayDropdownPreference(
             title = stringResource(id = R.string.settings_sucompat),
@@ -301,28 +307,50 @@ private fun HidingSwitchesCardMiuix(uiState: HideEnvironmentUiState, actions: Hi
 }
 
 /**
- * Top-of-page filter notice. It is the only place the visible entry count is stated, and it uses
- * the same filtered list the rest of the page renders.
+ * Runtime-mode banner. The mode is tri-state (LKM / GKI built-in / not detected) and this is the
+ * single place the page states it: a bare Boolean could label an unanswerable kernel as GKI. The
+ * filter count is appended only when a pack is loaded, because it is the pack that gets filtered.
  */
 @Composable
 private fun RuntimeModeBannerMiuix(uiState: HideEnvironmentUiState) {
     val unknown = uiState.runtimeMode == HidingRuntimeMode.Unknown
-    if (!unknown && uiState.packState != HidingPackState.Ready) return
+    val hasPack = uiState.packState == HidingPackState.Ready
+
+    val (tagBackground, tagContent) = when {
+        unknown -> colorScheme.errorContainer to colorScheme.onErrorContainer
+        uiState.runtimeMode == HidingRuntimeMode.Lkm -> colorScheme.primary to colorScheme.onPrimary
+        else -> colorScheme.tertiaryContainer to colorScheme.onTertiaryContainer
+    }
 
     Card(
         modifier = Modifier
             .padding(top = 12.dp)
             .fillMaxWidth(),
     ) {
-        HeaderComponentMiuix(
-            icon = if (unknown) Icons.Rounded.Warning else Icons.Rounded.Info,
-            title = if (unknown) {
-                stringResource(id = R.string.hide_environment_mode_unknown)
-            } else {
-                stringResource(
+        BasicComponent(
+            startAction = {
+                StatusTag(
+                    label = if (unknown) {
+                        stringResource(id = R.string.hide_environment_mode_tag_unknown)
+                    } else {
+                        uiState.runtimeModeLabel
+                    },
+                    modifier = Modifier.padding(end = 4.dp),
+                    backgroundColor = tagBackground,
+                    contentColor = tagContent,
+                )
+            },
+            title = when {
+                unknown -> stringResource(id = R.string.hide_environment_mode_unknown)
+                hasPack -> stringResource(
                     id = R.string.hide_environment_mode_filtered,
                     uiState.runtimeModeLabel,
                     uiState.packEntries.size - uiState.visibleEntries.size,
+                )
+
+                else -> stringResource(
+                    id = R.string.hide_environment_mode_known,
+                    uiState.runtimeModeLabel,
                 )
             },
             summary = null
@@ -340,9 +368,10 @@ private fun OneKeyHideCardMiuix(uiState: HideEnvironmentUiState, actions: HideEn
             .fillMaxWidth(),
     ) {
         HeaderComponentMiuix(
-            icon = Icons.Rounded.LayersClear,
+            icon = Icons.Rounded.AutoFixHigh,
             title = stringResource(id = R.string.hide_environment_onekey_title),
-            summary = stringResource(id = R.string.hide_environment_onekey_summary)
+            summary = stringResource(id = R.string.hide_environment_onekey_summary),
+            titleColor = colorScheme.primary
         )
         CheckboxPreference(
             title = stringResource(id = R.string.hide_environment_onekey_lsposed),
@@ -403,7 +432,8 @@ private fun QuickInstallCardMiuix(uiState: HideEnvironmentUiState, actions: Hide
         HeaderComponentMiuix(
             icon = Icons.Rounded.BugReport,
             title = stringResource(id = R.string.hide_environment_quick_title),
-            summary = stringResource(id = R.string.hide_environment_quick_summary)
+            summary = stringResource(id = R.string.hide_environment_quick_summary),
+            titleColor = colorScheme.primary
         )
         if (uiState.packState == HidingPackState.Ready) {
             uiState.quickEntries.forEach { entry ->
@@ -415,7 +445,8 @@ private fun QuickInstallCardMiuix(uiState: HideEnvironmentUiState, actions: Hide
                     onCheckedChange = { actions.onToggleQuickEntry(entry.id) },
                     startAction = { PreferenceIcon(categoryIcon(entry.category)) },
                     enabled = !uiState.isBatchRunning &&
-                        installState != HidingPackInstallState.Installed
+                        installState != HidingPackInstallState.Installed &&
+                        installState != HidingPackInstallState.PendingReboot
                 )
             }
         }
@@ -435,12 +466,32 @@ private fun QuickInstallCardMiuix(uiState: HideEnvironmentUiState, actions: Hide
     }
 }
 
+/**
+ * The step log of a batch run, aligned to the card's own content margin and colour-coded by outcome.
+ * Mirrors `StepLogMaterial`: same 16.dp start, same error/informational colours, same final-line
+ * emphasis and the same 160.dp ceiling so a long log cannot push the batch button out of the card.
+ */
 @Composable
 private fun StepLogMiuix(lines: List<String>) {
     if (lines.isEmpty()) return
-    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-        lines.forEach { line ->
-            Text(text = line, fontSize = SMALL_TEXT)
+    // Locale-proof failure markers: the step line embeds "失败:%s"/"Failed: %s" and the quick log
+    // embeds the short failure label, so both families are recognised without matching English.
+    val failedMarker = stringResource(id = R.string.hide_environment_step_failed, "")
+    val failedLabel = stringResource(id = R.string.hide_environment_pack_failed)
+    Column(
+        modifier = Modifier
+            .heightIn(max = 160.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    ) {
+        lines.forEachIndexed { index, line ->
+            val failed = line.contains(failedMarker.trim()) || line.contains(failedLabel)
+            Text(
+                text = line,
+                fontSize = SMALL_TEXT,
+                color = if (failed) colorScheme.error else colorScheme.onSurfaceVariantSummary,
+                fontWeight = if (index == lines.lastIndex) FontWeight.Medium else null
+            )
         }
     }
 }
@@ -450,6 +501,7 @@ private fun detectorSummary(entry: HidingPackEntry, installState: HidingPackInst
     val stateLabel = when (installState) {
         HidingPackInstallState.NotInstalled -> ""
         HidingPackInstallState.Installing -> stringResource(id = R.string.hide_environment_pack_installing)
+        HidingPackInstallState.PendingReboot -> stringResource(id = R.string.hide_environment_pack_reboot_hint)
         HidingPackInstallState.Installed -> stringResource(id = R.string.hide_environment_pack_installed)
         HidingPackInstallState.Failed -> stringResource(id = R.string.hide_environment_pack_failed)
     }
@@ -466,12 +518,27 @@ private fun HidingPackCardMiuix(uiState: HideEnvironmentUiState, actions: HideEn
         HeaderComponentMiuix(
             icon = Icons.Rounded.Extension,
             title = stringResource(id = R.string.hide_environment_pack_title),
-            summary = stringResource(id = R.string.hide_environment_pack_summary)
+            summary = stringResource(id = R.string.hide_environment_pack_summary),
+            titleColor = colorScheme.primary
         )
+        // Six PathMask variants share one moduleId and all apply to the LKM mode, so they are only
+        // collapsed to the matching branch when one really matches. Say so instead of silently
+        // showing six near-identical rows that overwrite each other when installed.
+        if (uiState.packState == HidingPackState.Ready &&
+            !uiState.pathMaskMatched &&
+            uiState.visibleEntries.any { it.category == HidingPackCategory.PathMask }
+        ) {
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Warning,
+                title = stringResource(id = R.string.hide_environment_onekey_no_branch),
+                summary = null
+            )
+        }
         when (uiState.packState) {
             HidingPackState.Loading -> Unit
             HidingPackState.Unavailable -> HeaderComponentMiuix(
-                icon = Icons.Rounded.BugReport,
+                // Info, not BugReport: an empty pack is not a detector fact.
+                icon = Icons.Rounded.Info,
                 title = stringResource(id = R.string.hide_environment_pack_empty),
                 summary = null
             )
@@ -482,7 +549,6 @@ private fun HidingPackCardMiuix(uiState: HideEnvironmentUiState, actions: HideEn
                 HidingPackEntryMiuix(uiState, entry, actions)
             }
         }
-        RefreshPreference(actions.onRefresh)
     }
 }
 
@@ -498,6 +564,14 @@ private fun HidingPackEntryMiuix(
         append(scopeLabel)
         append(" | v")
         append(entry.version)
+        // Six PathMask variants share one moduleId, so while none matches this kernel the branch is
+        // the only part of the row that tells them apart.
+        if (entry.category == HidingPackCategory.PathMask && !uiState.pathMaskMatched) {
+            entry.branch?.let {
+                append(" | ")
+                append(it)
+            }
+        }
         if (entry.description.isNotBlank()) {
             append(" | ")
             append(entry.description)
@@ -531,6 +605,11 @@ private fun HidingPackEndActionMiuix(
     when {
         !entry.isInstallable -> Text(
             text = stringResource(id = R.string.hide_environment_pack_scope_data),
+            fontSize = SMALL_TEXT
+        )
+
+        installState == HidingPackInstallState.PendingReboot -> Text(
+            text = stringResource(id = R.string.hide_environment_pack_reboot_hint),
             fontSize = SMALL_TEXT
         )
 
@@ -589,6 +668,7 @@ private fun HeaderComponentMiuix(
     icon: ImageVector,
     title: String,
     summary: String? = null,
+    titleColor: Color = colorScheme.onBackground,
     endActions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     BasicComponent(endActions = endActions) {
@@ -616,7 +696,7 @@ private fun HeaderComponentMiuix(
                 text = title,
                 fontSize = MiuixTheme.textStyles.headline1.fontSize,
                 fontWeight = FontWeight.Medium,
-                color = colorScheme.onBackground
+                color = titleColor
             )
         }
         if (summary != null) {
@@ -630,6 +710,26 @@ private fun HeaderComponentMiuix(
                 )
             )
         }
+    }
+}
+
+/**
+ * Licence notice. It used to be one more row inside the environment-status card, where it read as
+ * a property of the running environment; the licence is not, so it gets its own card at the end.
+ */
+@Composable
+private fun RiskNoticeCardMiuix() {
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_risk_title),
+            summary = stringResource(id = R.string.hide_environment_risk_license),
+            titleColor = colorScheme.primary
+        )
     }
 }
 
@@ -662,4 +762,28 @@ private fun scopeStringRes(category: HidingPackCategory): Int = when (category) 
     HidingPackCategory.PathMask -> R.string.hide_environment_pack_scope_pathmask
     HidingPackCategory.Detector -> R.string.hide_environment_pack_scope_detectors
     HidingPackCategory.Data -> R.string.hide_environment_pack_scope_data
+}
+
+@Preview(name = "StepLog")
+@Composable
+private fun StepLogMiuixPreview() {
+    StepLogMiuix(
+        listOf(
+            stringResource(
+                R.string.hide_environment_step, 1, 3, "hybrid_mount",
+                stringResource(R.string.hide_environment_step_ok)
+            ),
+            stringResource(
+                R.string.hide_environment_step, 2, 3, "zygisksu",
+                stringResource(R.string.hide_environment_step_failed, "sha256 mismatch")
+            ),
+            stringResource(R.string.hide_environment_pack_reboot_hint)
+        )
+    )
+}
+
+@Preview(name = "StepLog mdpi 360dp", device = "spec:width=360dp,height=640dp,dpi=160")
+@Composable
+private fun StepLogMiuixMdpiPreview() {
+    StepLogMiuixPreview()
 }

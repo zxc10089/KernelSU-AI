@@ -33,6 +33,12 @@ enum class HidingPackState {
 enum class HidingPackInstallState {
     NotInstalled,
     Installing,
+
+    /**
+     * A module archive sits in `/data/adb/modules_update` and only becomes active after a reboot,
+     * so the row must not claim "installed" while the running system has not loaded it yet.
+     */
+    PendingReboot,
     Installed,
     Failed,
 }
@@ -52,7 +58,6 @@ data class HideEnvironmentUiState(
     val kernelUapiVersion: Int = 0,
     val managerUapiVersion: Int = 0,
     val isSafeMode: Boolean = false,
-    val isLkmMode: Boolean = false,
     val isLateLoadMode: Boolean = false,
     val selinuxStatus: String = "",
     val androidRelease: String = "",
@@ -122,6 +127,18 @@ data class HideEnvironmentUiState(
             return candidates.filter {
                 it.category != HidingPackCategory.PathMask || it.id in shownPathMask
             }
+        }
+
+    /**
+     * True when at least one PathMask variant declares this kernel's branch.
+     *
+     * [bundleEntries] deliberately falls back to showing every variant when nothing matches, so the
+     * page needs this flag to explain why six lookalike archives appeared instead of one.
+     */
+    val pathMaskMatched: Boolean
+        get() = visibleEntries.any {
+            it.category == HidingPackCategory.PathMask &&
+                it.branch?.let { branch -> branchMatchesKernel(branch, kernelRelease) } == true
         }
 
     /** The extra LSPosed module is only meaningful while Zygisk (zygisksu) is in the base set. */

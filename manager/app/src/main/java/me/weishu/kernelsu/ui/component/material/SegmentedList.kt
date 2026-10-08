@@ -8,8 +8,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -528,12 +531,23 @@ fun SegmentedCheckboxItem(
     title: String,
     summary: String? = null,
     colors: ListItemColors = defaultSegmentedColors(),
+    icon: ImageVector? = null,
     checked: Boolean,
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
     val interactionSource = remember { MutableInteractionSource() }
+
+    val checkbox: @Composable () -> Unit = {
+        Checkbox(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = null,
+            interactionSource = interactionSource,
+            modifier = Modifier.size(24.dp)
+        )
+    }
 
     SegmentedListItem(
         checked = checked,
@@ -545,14 +559,18 @@ fun SegmentedCheckboxItem(
         colors = colors,
         interactionSource = interactionSource,
         headlineContent = { Text(title) },
-        leadingContent = {
-            Checkbox(
-                checked = checked,
-                enabled = enabled,
-                onCheckedChange = null,
-                interactionSource = interactionSource,
-                modifier = Modifier.size(24.dp)
-            )
+        // Without an icon this is exactly the previous leading Checkbox; with one, the icon takes
+        // the leading slot and the Checkbox follows it, mirroring SegmentedSwitchItem's shape.
+        leadingContent = if (icon == null) {
+            checkbox
+        } else {
+            {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, title, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(8.dp))
+                    checkbox()
+                }
+            }
         },
         supportingContent = summary?.let { { Text(it) } }
     )

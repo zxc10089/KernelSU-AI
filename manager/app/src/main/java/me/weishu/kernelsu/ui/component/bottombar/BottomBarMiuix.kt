@@ -132,7 +132,10 @@ fun BottomBarMiuix(
                         lineHeight = 14.sp,
                         maxLines = 1,
                         softWrap = false,
-                        overflow = TextOverflow.Visible
+                        // Every item gets an exact 1/tabCount of the bar (59.2dp at 360dp with the
+                        // hide-environment page), so Visible let a long translation paint straight
+                        // over the neighbouring tab. One Ellipsis here protects all five items.
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

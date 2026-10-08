@@ -30,6 +30,7 @@ import me.weishu.kernelsu.Natives
 import me.weishu.kernelsu.R
 import me.weishu.kernelsu.ui.LocalMainPagerState
 import me.weishu.kernelsu.ui.icon.HideEnvironmentIcon
+import me.weishu.kernelsu.ui.icon.HideEnvironmentIconOutlined
 import me.weishu.kernelsu.ui.util.rootAvailable
 
 @Composable
@@ -44,7 +45,7 @@ fun BottomBarMaterial(navigationBadge: NavigationBadgeState) {
     val items = listOf(
         Triple(R.string.home, Icons.Filled.Home, Icons.Outlined.Home),
         Triple(R.string.superuser, Icons.Filled.Shield, Icons.Outlined.Shield),
-        Triple(R.string.hide_environment_tab, HideEnvironmentIcon, HideEnvironmentIcon),
+        Triple(R.string.hide_environment_tab, HideEnvironmentIcon, HideEnvironmentIconOutlined),
         Triple(R.string.module, Icons.Filled.Extension, Icons.Outlined.Extension),
         Triple(R.string.settings, Icons.Filled.Settings, Icons.Outlined.Settings)
     )

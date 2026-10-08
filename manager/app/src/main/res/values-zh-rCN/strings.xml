@@ -330,12 +330,14 @@
 <string name="hide_environment_refresh">刷新</string>
 <string name="hide_environment_unsupported">当前构建不支持环境隐藏</string>
 <string name="hide_environment_risk_title">风险提示</string>
-<string name="hide_environment_risk_keybox">未内置 attestation keybox：该文件含明文私钥，随包分发等于二次扩散凭据。</string>
+<string name="hide_environment_risk_keybox">未随 APK 内置 attestation keybox：其私钥为明文，随包分发等于二次扩散凭据。请通过本地终端从自备文件装入，私钥不会出现在界面与日志中。</string>
 <string name="hide_environment_risk_license">部分内置模块的作者声明禁止再分发，本 APK 请仅自用。</string>
 <string name="hide_environment_risk_size">内置完整资源包会把 release APK 从 61.0 MB 增大到 116.8 MB（其中检测 App 集占 81.4 MB）。</string>
 <!-- 运行模式过滤 -->
 <string name="hide_environment_mode_unknown">未检测到运行模式，已显示全部内容</string>
 <string name="hide_environment_mode_filtered">已按 %1$s 模式过滤，共隐藏 %2$d 项</string>
+<string name="hide_environment_mode_known">运行模式：%1$s</string>
+<string name="hide_environment_mode_tag_unknown">未检测到</string>
 <!-- 一键隐藏 -->
 <string name="hide_environment_onekey_title">一键隐藏</string>
 <string name="hide_environment_onekey_summary">按冻结顺序逐个安装隐藏模块；执行期间按钮置灰</string>

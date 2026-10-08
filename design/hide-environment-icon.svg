@@ -6,10 +6,18 @@
   This SVG is the SAME design as the Kotlin ImageVector: identical point list, identical
   command order, identical 24x24 viewport. Do not edit one without editing the other.
 
-  Kotlin counterpart:
+  TWO variants live here, mirroring the two ImageVectors in that file:
+    #hide-environment-filled    -> HideEnvironmentIcon          (fill, fill-rule evenodd)
+    #hide-environment-outlined  -> HideEnvironmentIconOutlined  (stroke-width 1.8, round cap/join)
+
+  Kotlin counterparts:
     ImageVector.Builder(name = "HideEnvironment", defaultWidth = 24.dp, defaultHeight = 24.dp,
                         viewportWidth = 24f, viewportHeight = 24f)
     path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd)
+    --
+    ImageVector.Builder(name = "HideEnvironmentOutlined", ...)
+    path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f,
+         strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
 
   Fill is a single flat black because the Compose Icon() composable re-tints the vector
   through its `tint` parameter; SolidColor(Color.Black) in Kotlin == fill="#000000" here.
@@ -30,7 +38,15 @@
   <title>Hide Environment</title>
 
   <!-- Subpath 1: intact shield silhouette, closed back up the lower-left facet.
-       Subpath 2: the 45-degree negative-space bar, strictly interior to subpath 1. -->
-  <path fill="#000000" fill-rule="evenodd"
+       Subpath 2: the 45-degree negative-space bar, strictly interior to subpath 1.
+       The two variants below carry the identical `d` string; only the paint differs. -->
+  <path id="hide-environment-filled" fill="#000000" fill-rule="evenodd"
+        d="M3.75 4.55 C3.75 3.25 4.8 2.2 6.1 2.2 L17.9 2.2 C19.2 2.2 20.25 3.25 20.25 4.55 L20.25 13.8 L12 21.8 L3.75 13.8 Z M7.8607 5.1393 L17.2607 14.5393 L15.1393 16.6607 L5.7393 7.2607 Z"/>
+
+  <!-- Same two subpaths, stroked instead of filled: the unselected partner of the filled variant,
+       matching how Icons.Filled / Icons.Outlined pair up for the other four destinations.
+       Round cap/join because the shield tip would otherwise miter into a spike. -->
+  <path id="hide-environment-outlined" fill="none" stroke="#000000" stroke-width="1.8"
+        stroke-linejoin="round" stroke-linecap="round"
         d="M3.75 4.55 C3.75 3.25 4.8 2.2 6.1 2.2 L17.9 2.2 C19.2 2.2 20.25 3.25 20.25 4.55 L20.25 13.8 L12 21.8 L3.75 13.8 Z M7.8607 5.1393 L17.2607 14.5393 L15.1393 16.6607 L5.7393 7.2607 Z"/>
 </svg>

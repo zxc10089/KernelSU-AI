@@ -115,6 +115,10 @@ class HideEnvironmentViewModel(
             // The count on screen and the recommendations must come from the same filtered list.
             val visibleEntries = pack?.entries.orEmpty().filter { it.appliesTo(runtimeMode) }
             val installedIds = if (pack == null) emptySet() else packRepo.installedIds(pack.entries)
+            // A module ksud staged in /data/adb/modules_update is present but not live yet, so the
+            // row has to read "reboot to take effect" instead of "installed".
+            val pendingRebootIds =
+                if (pack == null) emptySet() else packRepo.pendingRebootIds(pack.entries)
             val recommendedIds = visibleEntries
                 .filter { it.category == HidingPackCategory.PathMask }
                 .filter { entry -> entry.branch?.let { branchMatchesKernel(it, kernelRelease) } == true }
@@ -127,7 +131,6 @@ class HideEnvironmentViewModel(
                     kernelUapiVersion = kernelUapiVersion,
                     managerUapiVersion = managerUapiVersion,
                     isSafeMode = isSafeMode,
-                    isLkmMode = isLkmMode,
                     isLateLoadMode = isLateLoadMode,
                     selinuxStatus = selinuxStatus,
                     androidRelease = androidRelease,
@@ -144,6 +147,7 @@ class HideEnvironmentViewModel(
                     packState = if (pack == null) HidingPackState.Unavailable else HidingPackState.Ready,
                     installStates = pack?.entries.orEmpty().associate { entry ->
                         entry.id to when {
+                            entry.id in pendingRebootIds -> HidingPackInstallState.PendingReboot
                             entry.id in installedIds -> HidingPackInstallState.Installed
                             state.installStates[entry.id] == HidingPackInstallState.Installing ->
                                 HidingPackInstallState.Installing
@@ -414,7 +418,13 @@ class HideEnvironmentViewModel(
         val result = installMutex.withLock { packRepo.install(entry) }
         updateInstallState(
             entry.id,
-            if (result.isSuccess) HidingPackInstallState.Installed else HidingPackInstallState.Failed,
+            when {
+                !result.isSuccess -> HidingPackInstallState.Failed
+                // ksud unpacks modules into /data/adb/modules_update, so the running system has not
+                // loaded them yet; a detector is an APK and is live as soon as pm returns.
+                entry.isModuleArchive -> HidingPackInstallState.PendingReboot
+                else -> HidingPackInstallState.Installed
+            },
         )
         return result
     }

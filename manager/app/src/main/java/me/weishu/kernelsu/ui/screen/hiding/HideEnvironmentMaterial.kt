@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Rule
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Extension
@@ -25,10 +27,10 @@ import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -42,6 +44,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.weishu.kernelsu.R
@@ -57,6 +61,7 @@ import me.weishu.kernelsu.ui.component.material.SegmentedListItem
 import me.weishu.kernelsu.ui.component.material.SegmentedSwitchItem
 import me.weishu.kernelsu.ui.component.material.expressiveTopAppBarColors
 import me.weishu.kernelsu.ui.component.rebootlistpopup.rememberRebootAction
+import me.weishu.kernelsu.ui.component.statustag.StatusTag
 
 @Composable
 fun HideEnvironmentPagerMaterial(
@@ -68,7 +73,7 @@ fun HideEnvironmentPagerMaterial(
 
     ExpressiveScaffold(
         topBar = {
-            HideEnvironmentTopBar(scrollBehavior = scrollBehavior)
+            HideEnvironmentTopBar(scrollBehavior = scrollBehavior, onRefresh = actions.onRefresh)
         },
         contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
     ) { paddingValues ->
@@ -78,15 +83,18 @@ fun HideEnvironmentPagerMaterial(
                 .nestedScroll(scrollBehavior.nestedScrollConnection)
                 .verticalScroll(rememberScrollState())
         ) {
+            // The status card is read-only and true on every device, so it stays visible even when
+            // the kernel cannot honour the switches; only the action cards are replaced.
+            RuntimeModeBannerMaterial(uiState)
+            EnvironmentStatusColumnMaterial(uiState, actions)
             if (!uiState.isFullFeatured) {
-                UnsupportedColumnMaterial(actions)
+                UnsupportedColumnMaterial()
             } else {
-                RuntimeModeBannerMaterial(uiState)
-                EnvironmentStatusColumnMaterial(uiState)
                 HidingSwitchesColumnMaterial(uiState, actions)
                 OneKeyHideColumnMaterial(uiState, actions)
                 QuickInstallColumnMaterial(uiState, actions)
                 HidingPackColumnMaterial(uiState, actions)
+                RiskNoticeColumnMaterial()
             }
             Spacer(modifier = Modifier.height(bottomInnerPadding))
         }
@@ -94,9 +102,22 @@ fun HideEnvironmentPagerMaterial(
 }
 
 @Composable
-private fun HideEnvironmentTopBar(scrollBehavior: TopAppBarScrollBehavior) {
+private fun HideEnvironmentTopBar(
+    scrollBehavior: TopAppBarScrollBehavior,
+    onRefresh: () -> Unit,
+) {
     LargeFlexibleTopAppBar(
         title = { Text(stringResource(id = R.string.hide_environment)) },
+        // The pack card no longer carries its own refresh row, so this is the refresh entry that is
+        // reachable at every scroll position, collapsed app bar included.
+        actions = {
+            IconButton(onClick = onRefresh) {
+                Icon(
+                    imageVector = Icons.Filled.Refresh,
+                    contentDescription = stringResource(id = R.string.hide_environment_refresh)
+                )
+            }
+        },
         colors = expressiveTopAppBarColors(),
         windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
         scrollBehavior = scrollBehavior
@@ -104,23 +125,16 @@ private fun HideEnvironmentTopBar(scrollBehavior: TopAppBarScrollBehavior) {
 }
 
 @Composable
-private fun UnsupportedColumnMaterial(actions: HideEnvironmentActions) {
+private fun UnsupportedColumnMaterial() {
+    // The app bar above already says 环境隐藏, so repeating it as the row title was pure
+    // duplication. The refresh row moved into the status card, which renders in this state too.
     SegmentedColumn(
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
         content = listOf(
             {
                 SegmentedListItem(
-                    headlineContent = { Text(stringResource(id = R.string.hide_environment)) },
-                    supportingContent = { Text(stringResource(id = R.string.hide_environment_unsupported)) },
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_unsupported)) },
                     leadingContent = { Icon(Icons.Filled.Warning, null) }
-                )
-            },
-            {
-                SegmentedListItem(
-                    onClick = actions.onRefresh,
-                    headlineContent = { Text(stringResource(id = R.string.hide_environment_refresh)) },
-                    leadingContent = { Icon(Icons.Filled.Refresh, null) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
                 )
             }
         )
@@ -128,7 +142,10 @@ private fun UnsupportedColumnMaterial(actions: HideEnvironmentActions) {
 }
 
 @Composable
-private fun EnvironmentStatusColumnMaterial(uiState: HideEnvironmentUiState) {
+private fun EnvironmentStatusColumnMaterial(
+    uiState: HideEnvironmentUiState,
+    actions: HideEnvironmentActions,
+) {
     val kernelSummary = listOf(uiState.androidRelease, uiState.kernelRelease)
         .filter { it.isNotBlank() }
         .joinToString(" | ")
@@ -137,10 +154,36 @@ private fun EnvironmentStatusColumnMaterial(uiState: HideEnvironmentUiState) {
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
         title = stringResource(id = R.string.hide_environment_status_title),
         content = buildList {
+            // The mode is stated once in the banner above and the licence at the end of the page, so
+            // neither is repeated here. The kernel release row carries the android/kernel summary
+            // that used to occupy a row of its own. Status rows only ever use the
+            // Info/CheckCircle/Warning/RestartAlt set; Security stays on the SELinux *switch*.
             add {
                 StatusRow(
                     icon = Icons.Filled.Info,
-                    title = stringResource(id = R.string.hide_environment_summary)
+                    title = stringResource(id = R.string.hide_environment_kernel_release),
+                    summary = kernelSummary
+                )
+            }
+            add {
+                StatusRow(
+                    icon = Icons.Filled.Info,
+                    title = stringResource(id = R.string.hide_environment_kernel_uapi),
+                    summary = uiState.kernelUapiVersion.toString()
+                )
+            }
+            add {
+                StatusRow(
+                    icon = Icons.Filled.Info,
+                    title = stringResource(id = R.string.hide_environment_manager_uapi),
+                    summary = uiState.managerUapiVersion.toString()
+                )
+            }
+            add {
+                StatusRow(
+                    icon = Icons.Filled.Info,
+                    title = stringResource(id = R.string.hide_environment_selinux_status),
+                    summary = uiState.selinuxStatus
                 )
             }
             // Boolean capabilities are only rendered when they hold; the repo has no yes/no string key.
@@ -160,14 +203,6 @@ private fun EnvironmentStatusColumnMaterial(uiState: HideEnvironmentUiState) {
                     )
                 }
             }
-            if (uiState.isLkmMode) {
-                add {
-                    StatusRow(
-                        icon = Icons.Filled.Extension,
-                        title = stringResource(id = R.string.hide_environment_lkm_mode)
-                    )
-                }
-            }
             if (uiState.isLateLoadMode) {
                 add {
                     StatusRow(
@@ -176,41 +211,14 @@ private fun EnvironmentStatusColumnMaterial(uiState: HideEnvironmentUiState) {
                     )
                 }
             }
+            // The only refresh entry point inside the page content: it used to hide at the bottom of
+            // the pack card, i.e. below the fold on a 360dp screen.
             add {
-                StatusRow(
-                    icon = Icons.Filled.SystemUpdate,
-                    title = stringResource(id = R.string.hide_environment_kernel_uapi),
-                    summary = uiState.kernelUapiVersion.toString()
-                )
-            }
-            add {
-                StatusRow(
-                    icon = Icons.Filled.SystemUpdate,
-                    title = stringResource(id = R.string.hide_environment_manager_uapi),
-                    summary = uiState.managerUapiVersion.toString()
-                )
-            }
-            add {
-                StatusRow(
-                    icon = Icons.Filled.Info,
-                    title = stringResource(id = R.string.hide_environment_kernel_release),
-                    summary = kernelSummary
-                )
-            }
-            add {
-                StatusRow(
-                    icon = Icons.Filled.Security,
-                    title = stringResource(id = R.string.hide_environment_selinux_status),
-                    summary = uiState.selinuxStatus
-                )
-            }
-            add {
-                // One row only: title + the user-facing disclaimer as summary.
-                // hide_environment_risk_keybox / _size stay defined but are no longer rendered.
-                StatusRow(
-                    icon = Icons.Filled.BugReport,
-                    title = stringResource(id = R.string.hide_environment_risk_title),
-                    summary = stringResource(id = R.string.hide_environment_risk_license)
+                SegmentedListItem(
+                    onClick = actions.onRefresh,
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_refresh)) },
+                    leadingContent = { Icon(Icons.Filled.Refresh, null) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
                 )
             }
         }
@@ -281,13 +289,23 @@ private fun HidingSwitchesColumnMaterial(uiState: HideEnvironmentUiState, action
 }
 
 /**
- * Top-of-page filter notice. It is the only place the visible entry count is stated, and it uses
- * the same filtered list the rest of the page renders.
+ * Runtime-mode banner. The mode is tri-state (LKM / GKI built-in / not detected) and this is the
+ * single place the page states it: a bare Boolean could label an unanswerable kernel as GKI. The
+ * filter count is appended only when a pack is loaded, because it is the pack that gets filtered.
  */
 @Composable
 private fun RuntimeModeBannerMaterial(uiState: HideEnvironmentUiState) {
     val unknown = uiState.runtimeMode == HidingRuntimeMode.Unknown
-    if (!unknown && uiState.packState != HidingPackState.Ready) return
+    val hasPack = uiState.packState == HidingPackState.Ready
+
+    val (tagBackground, tagContent) = when {
+        unknown -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        uiState.runtimeMode == HidingRuntimeMode.Lkm ->
+            MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.onPrimary
+
+        else ->
+            MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+    }
 
     SegmentedColumn(
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
@@ -296,19 +314,31 @@ private fun RuntimeModeBannerMaterial(uiState: HideEnvironmentUiState) {
                 SegmentedListItem(
                     headlineContent = {
                         Text(
-                            if (unknown) {
-                                stringResource(id = R.string.hide_environment_mode_unknown)
-                            } else {
-                                stringResource(
+                            when {
+                                unknown -> stringResource(id = R.string.hide_environment_mode_unknown)
+                                hasPack -> stringResource(
                                     id = R.string.hide_environment_mode_filtered,
                                     uiState.runtimeModeLabel,
                                     uiState.packEntries.size - uiState.visibleEntries.size,
+                                )
+
+                                else -> stringResource(
+                                    id = R.string.hide_environment_mode_known,
+                                    uiState.runtimeModeLabel,
                                 )
                             }
                         )
                     },
                     leadingContent = {
-                        Icon(if (unknown) Icons.Filled.Warning else Icons.Filled.Info, null)
+                        StatusTag(
+                            label = if (unknown) {
+                                stringResource(id = R.string.hide_environment_mode_tag_unknown)
+                            } else {
+                                uiState.runtimeModeLabel
+                            },
+                            backgroundColor = tagBackground,
+                            contentColor = tagContent,
+                        )
                     }
                 )
             }
@@ -329,7 +359,7 @@ private fun OneKeyHideColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                         headlineContent = {
                             Text(stringResource(id = R.string.hide_environment_onekey_summary))
                         },
-                        leadingContent = { Icon(Icons.Filled.LayersClear, null) }
+                        leadingContent = { Icon(Icons.Filled.AutoFixHigh, null) }
                     )
                 },
                 {
@@ -340,6 +370,7 @@ private fun OneKeyHideColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                         } else {
                             stringResource(id = R.string.hide_environment_onekey_lsposed_requires_zygisk)
                         },
+                        icon = Icons.Filled.Extension,
                         checked = uiState.oneKeyOptions.installLsposed,
                         enabled = uiState.isLsposedOptionAvailable && !running,
                         onCheckedChange = actions.onSetOneKeyLsposed
@@ -348,6 +379,7 @@ private fun OneKeyHideColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                 {
                     SegmentedCheckboxItem(
                         title = stringResource(id = R.string.hide_environment_onekey_brick_rescue),
+                        icon = Icons.Filled.RestartAlt,
                         checked = uiState.oneKeyOptions.addBrickRescue,
                         enabled = !running,
                         onCheckedChange = actions.onSetOneKeyBrickRescue
@@ -401,9 +433,11 @@ private fun QuickInstallColumnMaterial(uiState: HideEnvironmentUiState, actions:
                             SegmentedCheckboxItem(
                                 title = entry.name,
                                 summary = materialDetectorSummary(entry, installState),
+                                icon = materialCategoryIcon(entry.category),
                                 checked = entry.id in uiState.quickSelectedIds,
                                 enabled = !uiState.isBatchRunning &&
-                                    installState != HidingPackInstallState.Installed,
+                                    installState != HidingPackInstallState.Installed &&
+                                    installState != HidingPackInstallState.PendingReboot,
                                 onCheckedChange = { actions.onToggleQuickEntry(entry.id) }
                             )
                         }
@@ -422,12 +456,36 @@ private fun QuickInstallColumnMaterial(uiState: HideEnvironmentUiState, actions:
     }
 }
 
+/**
+ * The step log of a batch run. Success and failure used to share one colour and one style, and an
+ * unbounded list could push the batch button out of the card, so the outcome is colour-coded, the
+ * final line (always 需重启后生效) is emphasised, and the block scrolls under a fixed ceiling.
+ */
 @Composable
 private fun StepLogMaterial(lines: List<String>) {
     if (lines.isEmpty()) return
-    Column(modifier = Modifier.padding(top = 6.dp)) {
-        lines.forEach { line ->
-            Text(text = line, style = MaterialTheme.typography.bodySmall)
+    // Locale-proof failure markers: the step line embeds "失败:%s"/"Failed: %s" and the quick log
+    // embeds the short failure label, so both families are recognised without matching English.
+    val failedMarker = stringResource(id = R.string.hide_environment_step_failed, "")
+    val failedLabel = stringResource(id = R.string.hide_environment_pack_failed)
+    Column(
+        modifier = Modifier
+            .heightIn(max = 160.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
+    ) {
+        lines.forEachIndexed { index, line ->
+            val failed = line.contains(failedMarker.trim()) || line.contains(failedLabel)
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (failed) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                fontWeight = if (index == lines.lastIndex) FontWeight.Medium else null
+            )
         }
     }
 }
@@ -437,6 +495,7 @@ private fun materialDetectorSummary(entry: HidingPackEntry, installState: Hiding
     val stateLabel = when (installState) {
         HidingPackInstallState.NotInstalled -> ""
         HidingPackInstallState.Installing -> stringResource(id = R.string.hide_environment_pack_installing)
+        HidingPackInstallState.PendingReboot -> stringResource(id = R.string.hide_environment_pack_reboot_hint)
         HidingPackInstallState.Installed -> stringResource(id = R.string.hide_environment_pack_installed)
         HidingPackInstallState.Failed -> stringResource(id = R.string.hide_environment_pack_failed)
     }
@@ -455,12 +514,29 @@ private fun HidingPackColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                     leadingContent = { Icon(Icons.Filled.Extension, null) }
                 )
             }
+            // Six PathMask variants share one moduleId and all apply to the LKM mode, so they are
+            // only collapsed to the matching branch when one really matches. Say so instead of
+            // silently showing six near-identical rows that overwrite each other when installed.
+            if (uiState.packState == HidingPackState.Ready &&
+                !uiState.pathMaskMatched &&
+                uiState.visibleEntries.any { it.category == HidingPackCategory.PathMask }
+            ) {
+                add {
+                    SegmentedListItem(
+                        headlineContent = {
+                            Text(stringResource(id = R.string.hide_environment_onekey_no_branch))
+                        },
+                        leadingContent = { Icon(Icons.Filled.Warning, null) }
+                    )
+                }
+            }
             when (uiState.packState) {
                 HidingPackState.Loading -> Unit
                 HidingPackState.Unavailable -> add {
                     SegmentedListItem(
+                        // Info, not BugReport: an empty pack is not a detector fact.
                         headlineContent = { Text(stringResource(id = R.string.hide_environment_pack_empty)) },
-                        leadingContent = { Icon(Icons.Filled.BugReport, null) }
+                        leadingContent = { Icon(Icons.Filled.Info, null) }
                     )
                 }
 
@@ -469,14 +545,6 @@ private fun HidingPackColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                 HidingPackState.Ready -> uiState.bundleEntries.forEach { entry ->
                     add { HidingPackEntryMaterial(uiState, entry, actions) }
                 }
-            }
-            add {
-                SegmentedListItem(
-                    onClick = actions.onRefresh,
-                    headlineContent = { Text(stringResource(id = R.string.hide_environment_refresh)) },
-                    leadingContent = { Icon(Icons.Filled.Refresh, null) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
-                )
             }
         }
     )
@@ -495,6 +563,14 @@ private fun HidingPackEntryMaterial(
         append(scopeLabel)
         append(" | v")
         append(entry.version)
+        // Six PathMask variants share one moduleId, so while none matches this kernel the branch is
+        // the only part of the row that tells them apart.
+        if (entry.category == HidingPackCategory.PathMask && !uiState.pathMaskMatched) {
+            entry.branch?.let {
+                append(" | ")
+                append(it)
+            }
+        }
         if (entry.description.isNotBlank()) {
             append(" | ")
             append(entry.description)
@@ -506,6 +582,7 @@ private fun HidingPackEntryMaterial(
     }
     val canInstall = entry.isInstallable &&
         installState != HidingPackInstallState.Installed &&
+        installState != HidingPackInstallState.PendingReboot &&
         installState != HidingPackInstallState.Installing
     val onInstallClick: (() -> Unit)? = if (canInstall) {
         { actions.onInstallPackEntry(entry) }
@@ -526,6 +603,28 @@ private fun HidingPackEntryMaterial(
                 Text(stringResource(id = R.string.hide_environment_pack_install))
             }
         }
+    )
+}
+
+/**
+ * Licence notice. It used to be one more row inside the environment-status card, where it read as
+ * a property of the running environment; the licence is not, so it gets its own block at the end.
+ */
+@Composable
+private fun RiskNoticeColumnMaterial() {
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_risk_title),
+        content = listOf(
+            {
+                SegmentedListItem(
+                    headlineContent = {
+                        Text(stringResource(id = R.string.hide_environment_risk_license))
+                    },
+                    leadingContent = { Icon(Icons.Filled.Info, null) }
+                )
+            }
+        )
     )
 }
 
@@ -557,6 +656,7 @@ private fun materialFeatureStatusSummary(status: String, fallback: String): Stri
 private fun materialInstallStateLabel(state: HidingPackInstallState): String? = when (state) {
     HidingPackInstallState.NotInstalled -> null
     HidingPackInstallState.Installing -> stringResource(id = R.string.hide_environment_pack_installing)
+    HidingPackInstallState.PendingReboot -> stringResource(id = R.string.hide_environment_pack_reboot_hint)
     HidingPackInstallState.Installed -> stringResource(id = R.string.hide_environment_pack_installed)
     HidingPackInstallState.Failed -> stringResource(id = R.string.hide_environment_pack_failed)
 }
@@ -573,4 +673,28 @@ private fun materialScopeStringRes(category: HidingPackCategory): Int = when (ca
     HidingPackCategory.PathMask -> R.string.hide_environment_pack_scope_pathmask
     HidingPackCategory.Detector -> R.string.hide_environment_pack_scope_detectors
     HidingPackCategory.Data -> R.string.hide_environment_pack_scope_data
+}
+
+@Preview(name = "StepLog")
+@Composable
+private fun StepLogMaterialPreview() {
+    StepLogMaterial(
+        listOf(
+            stringResource(
+                R.string.hide_environment_step, 1, 3, "hybrid_mount",
+                stringResource(R.string.hide_environment_step_ok)
+            ),
+            stringResource(
+                R.string.hide_environment_step, 2, 3, "zygisksu",
+                stringResource(R.string.hide_environment_step_failed, "sha256 mismatch")
+            ),
+            stringResource(R.string.hide_environment_pack_reboot_hint)
+        )
+    )
+}
+
+@Preview(name = "StepLog mdpi 360dp", device = "spec:width=360dp,height=640dp,dpi=160")
+@Composable
+private fun StepLogMaterialMdpiPreview() {
+    StepLogMaterialPreview()
 }

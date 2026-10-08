@@ -336,12 +336,14 @@
 <string name="hide_environment_refresh">Refresh</string>
 <string name="hide_environment_unsupported">Environment hiding is unavailable on this build</string>
 <string name="hide_environment_risk_title">Risk notice</string>
-<string name="hide_environment_risk_keybox">The attestation keybox file is not bundled: it holds a plaintext private key, so shipping it would leak the credential a second time.</string>
+<string name="hide_environment_risk_keybox">The attestation keybox is not bundled with this APK: its private key is plaintext, so shipping it would spread the credential. Install it from your own file with the local terminal; the key never enters the UI or any log.</string>
 <string name="hide_environment_risk_license">Some bundled modules are published by their authors under a no-redistribution licence. Keep this APK for personal use only.</string>
 <string name="hide_environment_risk_size">Bundling the full resource pack grows the release APK from 61.0 MB to 116.8 MB (the detector set accounts for 81.4 MB).</string>
 <!-- Runtime mode gating -->
 <string name="hide_environment_mode_unknown">Runtime mode not detected; showing everything</string>
 <string name="hide_environment_mode_filtered">Filtered for %1$s mode; %2$d item(s) hidden</string>
+<string name="hide_environment_mode_known">Running mode: %1$s</string>
+<string name="hide_environment_mode_tag_unknown">Not detected</string>
 <!-- One-tap hide -->
 <string name="hide_environment_onekey_title">One-tap hide</string>
 <string name="hide_environment_onekey_summary">Installs the hiding modules one after another; the button stays disabled while it runs</string>

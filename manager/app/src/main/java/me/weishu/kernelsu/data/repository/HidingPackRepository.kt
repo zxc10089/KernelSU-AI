@@ -39,6 +39,9 @@ interface HidingPackRepository {
     /** Resolves which of the given pack entries are already present on the device. */
     suspend fun installedIds(entries: List<HidingPackEntry>): Set<String>
 
+    /** The installed subset ksud staged in `/data/adb/modules_update`, pending a reboot. */
+    suspend fun pendingRebootIds(entries: List<HidingPackEntry>): Set<String>
+
     /** Installs one entry. Never throws; failures stay inside the [Result]. */
     suspend fun install(entry: HidingPackEntry): Result<Unit>
 }
@@ -71,20 +74,9 @@ class HidingPackRepositoryImpl(
             }
             entries.filter { entry ->
                 when (entry.category) {
-                    // Module archives are unpacked by ksud into /data/adb/modules. Presence alone is
-                    // not enough: the pack ships one specific build per module, so a module that
-                    // sits on the device at another versionCode must stay installable. Equality
-                    // rather than "installed < pack" because a fork may renumber downwards - the
-                    // AlwaysStrong build of tricky_store declares 104 where the TEESimulator-RS
-                    // build it replaces declared 235/307. versionCode <= 0 means the manifest does
-                    // not carry one, in which case presence is all we can honestly assert.
-                    HidingPackCategory.Module -> {
-                        val installed = modulesById[entry.moduleId ?: entry.id]
-                        installed != null &&
-                            (entry.versionCode <= 0 || installed.versionCode == entry.versionCode)
-                    }
+                    HidingPackCategory.Module, HidingPackCategory.PathMask ->
+                        isModuleEntryPresent(entry, modulesById)
 
-                    HidingPackCategory.PathMask -> isPathMaskVariantInstalled(entry, modulesById)
                     HidingPackCategory.Detector -> entry.packageName?.let {
                         it in installedPackages || isPackageInstalled(it)
                     } ?: false
@@ -93,6 +85,47 @@ class HidingPackRepositoryImpl(
                 }
             }.map { it.id }.toSet()
         }
+
+    /**
+     * The subset of [installedIds] that ksud has staged in `/data/adb/modules_update`: `module list`
+     * reports those with `update=true`, and they only take effect after a reboot. Only module
+     * archives can be staged that way, so detectors are never queried here.
+     */
+    override suspend fun pendingRebootIds(entries: List<HidingPackEntry>): Set<String> =
+        withContext(Dispatchers.IO) {
+            val modules = entries.filter {
+                it.category == HidingPackCategory.Module || it.category == HidingPackCategory.PathMask
+            }
+            if (modules.isEmpty()) return@withContext emptySet()
+            val modulesById = moduleRepository.getModules()
+                .getOrNull()
+                .orEmpty()
+                .associateBy { it.id }
+            modules.filter { entry ->
+                isModuleEntryPresent(entry, modulesById) &&
+                    modulesById[entry.moduleId ?: entry.id]?.update == true
+            }.map { it.id }.toSet()
+        }
+
+    /**
+     * Module archives are unpacked by ksud into `/data/adb/modules`. Presence alone is not enough:
+     * the pack ships one specific build per module, so a module that sits on the device at another
+     * versionCode must stay installable. Equality rather than "installed < pack" because a fork may
+     * renumber downwards - the AlwaysStrong build of tricky_store declares 104 where the
+     * TEESimulator-RS build it replaces declared 235/307. versionCode <= 0 means the manifest does
+     * not carry one, in which case presence is all we can honestly assert.
+     */
+    private fun isModuleEntryPresent(
+        entry: HidingPackEntry,
+        modulesById: Map<String, Module>,
+    ): Boolean = when (entry.category) {
+        HidingPackCategory.PathMask -> isPathMaskVariantInstalled(entry, modulesById)
+        else -> {
+            val installed = modulesById[entry.moduleId ?: entry.id]
+            installed != null &&
+                (entry.versionCode <= 0 || installed.versionCode == entry.versionCode)
+        }
+    }
 
     /**
      * Every PathMask branch ships `id=pathmask`, so the module id alone cannot say which branch is
