@@ -21,18 +21,22 @@
 
 ### 0.1 图标接口约定
 
-- 包名 `me.weishu.kernelsu.ui.icon`，顶层 `val HideEnvironmentIcon: ImageVector`。
-- `defaultWidth = 24.dp`、`defaultHeight = 24.dp`、`viewportWidth = 24f`、`viewportHeight = 24f`。
-- 单色：`path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd)`；最终颜色由调用方 `Icon(imageVector = ..., tint = ...)` 决定。
-- 未引入新依赖：只使用 `androidx.compose.ui.graphics.{Color, PathFillType, SolidColor}`、`androidx.compose.ui.graphics.vector.{ImageVector, path}`、`androidx.compose.ui.unit.dp`。
+- 包名 `me.weishu.kernelsu.ui.icon`，两个顶层 `val`：
+  - `val HideEnvironmentIcon: ImageVector` —— 实心（选中态）。
+  - `val HideEnvironmentIconOutlined: ImageVector` —— 描边（未选中态），与其余四个底栏目的 `Icons.Filled.*` / `Icons.Outlined.*` 配对方式一致。
+- 两者共用同一个私有路径构造器 `private fun PathBuilder.hideEnvironmentSubpaths()`，点表只存在一份，因此不存在"两个变体漂移"的可能。
+- `defaultWidth = 24.dp`、`defaultHeight = 24.dp`、`viewportWidth = 24f`、`viewportHeight = 24f`（两者相同）。
+- 单色：实心变体是 `path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd)`；描边变体是 `path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)`，宽度由 `private const val STROKE_LINE_WIDTH = 1.8f` 提供。最终颜色由调用方 `Icon(imageVector = ..., tint = ...)` 决定。
+- `strokeLineJoin = Round` 是必需的：盾尖处两条折面的夹角很尖，默认的 `Miter` 会向外拉出一根尖刺。
+- 未引入新依赖：只使用 `androidx.compose.ui.graphics.{Color, PathFillType, SolidColor, StrokeCap, StrokeJoin}`、`androidx.compose.ui.graphics.vector.{ImageVector, PathBuilder, path}`、`androidx.compose.ui.unit.dp`。
 
 ### 0.2 底栏接入点
 
 | 位置 | 文件 | 形式 |
 | --- | --- | --- |
-| Miuix 底栏 | `ui/component/bottombar/BottomBarMiuix.kt` | `BottomBarDestination.HideEnvironment(R.string.hide_environment_tab, HideEnvironmentIcon)` |
-| Material 底栏 | `ui/component/bottombar/BottomBarMaterial.kt` | `Triple(R.string.hide_environment_tab, HideEnvironmentIcon, HideEnvironmentIcon)` |
-| 大屏导航栏 | `ui/component/bottombar/NavigationRailMaterial.kt` | 第 3 项，同 Material 底栏 |
+| Miuix 底栏 | `ui/component/bottombar/BottomBarMiuix.kt` | `BottomBarDestination.HideEnvironment(R.string.hide_environment_tab, HideEnvironmentIcon)`；Miuix 的 `FloatingBottomBar` 只用同一个图标、由指示器胶囊内的 `LocalContentColor` 重新着色，没有实心 / 描边配对，故只用实心变体 |
+| Material 底栏 | `ui/component/bottombar/BottomBarMaterial.kt` | `Triple(R.string.hide_environment_tab, HideEnvironmentIcon, HideEnvironmentIconOutlined)` |
+| 大屏导航栏 | `ui/component/bottombar/NavigationRailMaterial.kt` | 第 3 项，与 Material 底栏同为一个三元组；两份 Material bar / rail 文件必须同改 |
 | 页面注册 | `ui/navigation3/Routes.kt`（`Route.HideEnvironment`）、`ui/MainActivity.kt`（pager 第 3 页） | — |
 
 ---
@@ -119,16 +123,18 @@
 | `Icons.Rounded.Cottage / Security / Extension / Settings` | `BottomBarMiuix.kt` | 实心填充，内容约占 24dp 的 2..22 |
 | `Icons.Filled.* / Icons.Outlined.*` | `BottomBarMaterial.kt` | 选中实心 / 未选中描边 |
 | `HideEnvironmentIcon` | 本设计 | 实心填充 + 3.00dp 内部负空间条；内容 3.75..20.25 × 2.2..21.8 |
+| `HideEnvironmentIconOutlined` | 本设计 | 同一份点表改为 1.8dp 描边：盾内中空、斜条成为中空槽；光学重量对齐 `Icons.Outlined.*` |
 
 轮廓占满安全区（16.5 × 19.6），只挖去一条 3.00dp 宽的斜条，填充率接近 `Icons.Filled.Shield`，比 `Icons.Outlined.Shield` 实心得多。放入 Miuix 底栏（全 Rounded 实心）与 Material 底栏时视觉重量一致。
 
 ### 1.5 SVG 与 Kotlin 的一致性
 
-`design/hide-environment-icon.svg` 使用与 Kotlin 相同的点表与命令顺序（单个 `<path>` 承载两条子路径，对应 Kotlin 的单个 `path { }` 块）：
+`design/hide-environment-icon.svg` 使用与 Kotlin 相同的点表与命令顺序。SVG 里 `#hide-environment-filled` 与 `#hide-environment-outlined` 两个 `<path>` 的 `d` 属性**逐字相同**，对应 Kotlin 里共用 `hideEnvironmentSubpaths()` 的两个 `ImageVector.Builder`；每个 `<path>` 承载两条子路径，对应 Kotlin 的单个 `path { }` 块：
 
 | Kotlin | SVG |
 | --- | --- |
-| `path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd)` | `<path fill="#000000" fill-rule="evenodd" …>` |
+| `path(fill = SolidColor(Color.Black), pathFillType = PathFillType.EvenOdd)` | `<path id="hide-environment-filled" fill="#000000" fill-rule="evenodd" …>` |
+| `path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)` | `<path id="hide-environment-outlined" fill="none" stroke="#000000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" …>` |
 | `moveTo(3.75f, 4.55f)` | `M3.75 4.55` |
 | `curveTo(3.75f, 3.25f, 4.8f, 2.2f, 6.1f, 2.2f)` | `C3.75 3.25 4.8 2.2 6.1 2.2` |
 | `lineTo(17.9f, 2.2f)` | `L17.9 2.2` |
@@ -198,21 +204,30 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 
 ### 3.1 已实现的分区结构
 
-页面本身不引入新图标与新技术栈，全部由既有组件拼装。两个主题的函数一一对应：
+页面本身不引入新图标与新技术栈，全部由既有组件拼装。两个主题的函数一一对应，渲染顺序如下（**以代码为准**；本节早期版本把"运行模式横幅"排在开关区之后，与代码不符，已修正）：
 
-| 分区 | Miuix（`ui/screen/hiding/HideEnvironmentMiuix.kt`） | Material（`ui/screen/hiding/HideEnvironmentMaterial.kt`） |
-| --- | --- | --- |
-| 页面入口 | `HideEnvironmentPagerMiuix`（Scaffold 骨架） | `HideEnvironmentPagerMaterial`（`ExpressiveScaffold` + `LargeFlexibleTopAppBar`） |
-| 能力不支持提示 | `UnsupportedCardMiuix`（`Card` + `BasicComponent`） | `UnsupportedColumnMaterial`（`SegmentedColumn`） |
-| 环境状态总览 | `EnvironmentStatusCardMiuix` | `EnvironmentStatusColumnMaterial` |
-| 隐藏开关区 | `HidingSwitchesCardMiuix`（3 个 `SwitchPreference`） | `HidingSwitchesColumnMaterial`（`SegmentedSwitchItem`） |
-| 运行模式横幅 | `RuntimeModeBannerMiuix` | `RuntimeModeBannerMaterial` |
-| 一键隐藏 | `OneKeyHideCardMiuix`（含 LSPosed 依赖提示、救砖提示、执行按钮） | `OneKeyHideColumnMaterial` |
-| 快速安装 | `QuickInstallCardMiuix` | `QuickInstallColumnMaterial` |
-| 隐藏资源包列表 | `HidingPackCardMiuix` + `HidingPackEntryMiuix` + `HidingPackEndActionMiuix` + `HeaderComponentMiuix` + `RefreshPreference` | `HidingPackColumnMaterial` + `HidingPackEntryMaterial` + `StatusRow` |
-| 分步执行日志 | `StepLogMiuix` | `StepLogMaterial` |
+| 顺序 | 分区 | Miuix（`ui/screen/hiding/HideEnvironmentMiuix.kt`） | Material（`ui/screen/hiding/HideEnvironmentMaterial.kt`） |
+| --- | --- | --- | --- |
+| 1 | 运行模式横幅（模式的唯一出口，三态 + `StatusTag`） | `RuntimeModeBannerMiuix` | `RuntimeModeBannerMaterial` |
+| 2 | 环境状态总览（4 条常显行 + 条件行 + 刷新行） | `EnvironmentStatusCardMiuix` | `EnvironmentStatusColumnMaterial` |
+| 3 | 能力不支持提示（`!isFullFeatured` 时**只替换动作区**，1、2 恒显） | `UnsupportedCardMiuix` | `UnsupportedColumnMaterial` |
+| 4 | 隐藏开关区（3 个开关） | `HidingSwitchesCardMiuix`（3 个 `SwitchPreference`） | `HidingSwitchesColumnMaterial`（`SegmentedSwitchItem`） |
+| 5 | 一键隐藏（LSPosed 依赖提示、救砖提示、执行按钮、步骤日志） | `OneKeyHideCardMiuix` | `OneKeyHideColumnMaterial` |
+| 6 | 快速安装（检测器勾选 + 安装） | `QuickInstallCardMiuix` | `QuickInstallColumnMaterial` |
+| 7 | 隐藏资源包列表 | `HidingPackCardMiuix` + `HidingPackEntryMiuix` + `HidingPackEndActionMiuix` | `HidingPackColumnMaterial` + `HidingPackEntryMaterial` |
+| 8 | 风险与许可（曾是"状态卡里的一行"，现已移到页尾独立成块） | `RiskNoticeCardMiuix` | `RiskNoticeColumnMaterial` |
 
-顶部信息层为「环境状态总览」，其下依次是开关区、一键 / 快速操作区、资源包列表与日志。这一顺序与主页「先结论、后明细」的范式一致：本页的首要问题是**当前是否已隐藏成功**，逐条明细属于第二信息层。
+页面入口分别是 `HideEnvironmentPagerMiuix`（`Scaffold` 骨架）与 `HideEnvironmentPagerMaterial`（`ExpressiveScaffold` + `LargeFlexibleTopAppBar`）；分步日志 `StepLogMiuix` / `StepLogMaterial` 渲染在各自的"一键隐藏 / 快速安装"卡内。
+
+**信息层级**：第 1 层 = 横幅（模式）+ 状态卡（内核身份、能力、刷新入口）；第 2 层 = 动作区（开关、一键、快捷、资源包）；第 3 层 = 风险与许可。本页的首要问题是**当前是否已隐藏成功**，逐条明细属于第二信息层。
+
+**运行模式的单一出口**：模式只在第 1 层标一次。它曾同时出现在横幅与状态卡（`isLkmMode: Boolean` 与 `runtimeMode: HidingRuntimeMode` 两个真值可互相矛盾），状态卡里那份已删除——内核不应答必须落到 `HidingRuntimeMode.Unknown`，不得用默认为 `false` 的布尔替代三态。
+
+**刷新入口**：Material 有两处（`LargeFlexibleTopAppBar(actions = { IconButton(Icons.Filled.Refresh) })` 与状态卡内的刷新行）；Miuix 只有状态卡内的 `RefreshPreference` 一处。Miuix 的 `TopAppBar` 来自 `top.yukonga.miuix.kmp.basic`，其 end-action 槽未在本仓库核实，**这是两个主题之间一处已知且有意保留的不对称**。上一版把唯一刷新入口放在资源包卡的最后一行，在 360dp 上落在首屏之外。
+
+**待重启态**：模块安装归档落在 `/data/adb/modules_update`，`ksud module list` 会把该项的 `update` 标成 `"true"`，而页面此前仍显示"已安装"。现在 `HidingPackInstallState` 增加 `PendingReboot`：资源包行显示 `hide_environment_pack_reboot_hint`（"重启后生效"）、隐藏安装按钮、勾选项置灰。
+
+**无匹配内核分支**：六个 PathMask 变体共用 `moduleId = pathmask` 且 order 都是 60，装错会互相覆盖。资源包卡在"有 PathMask 项但没有一个匹配当前内核"时插入一行 `hide_environment_onekey_no_branch`（图标 `Warning`），并把每个变体的 `branch` 追加到该行 summary 上，避免静默展示六条几乎相同的行。
 
 ### 3.2 状态与配色 token
 
@@ -222,6 +237,7 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 | 存在风险项 | 同上，改用 `WarningLevel.Error` | 动态取色：容器 `errorContainer` / 内容 `onErrorContainer`；非动态：亮 `0xFFF8E2E2` / 暗 `0xFF310808`，内容色 `0xFFF72727` |
 | 已就绪 | 与主页状态卡同构 | Miuix `secondaryContainer`（非动态亮 `0xFFDFFAE4` / 暗 `0xFF1A3825`）；Material `secondaryContainer` |
 | 未知 / 无法判定 | 文案回落到 `hide_environment_mode_unknown` 等"未知"资源 | 沿用所属容器的文本色 |
+| 运行模式标签（横幅上的 `StatusTag`） | 三态三色：`Unknown` → `errorContainer` / `onErrorContainer`；`Lkm` → `primary` / `onPrimary`；`GkiBuiltIn` → `tertiaryContainer` / `onTertiaryContainer` | 三对色在两个主题均已核实存在；`ui/theme/ThemeExt.kt:64-86` 对这些色统一做 `animateColor` |
 
 `WarningCard` 正文为 `fontSize = 14.sp`，容器 `Row(Modifier.fillMaxWidth().padding(16.dp))`，标题与可选 `action` 之间 `Arrangement.SpaceBetween`。
 
@@ -250,16 +266,21 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 
 | 项 | 数值 | 来源 |
 | --- | --- | --- |
-| 页面横向边距 | `HomeDimens.PageHorizontal` | `ui/screen/home/HomeDimens.kt`；见 `design/home-ui-review.md` |
-| 分组卡间距 | 每张 `Card` 之间 `Arrangement.spacedBy(HomeDimens.CardSpacing)` | 同上 |
-| 分组卡内边距 | `Column(Modifier.padding(HomeDimens.CardInner))` | 同上 |
-| 组内条目间距 | `Arrangement.spacedBy(12.dp)` | `ui/screen/home/HomeMiuix.kt` |
-| 总览卡大字 | 主 `22.sp` + `FontWeight.SemiBold`；副 `15.sp`；运行模式角标 `16.sp` + `FontWeight.Medium` | 同上 |
-| 总览卡内边距 | `padding(16.dp, 14.dp)`（主内容区）/ `padding(16.dp, 10.dp)`（底部） | 同上 |
-| 条目标题 / 副文本 | `MiuixTheme.textStyles.headline1.fontSize` + `FontWeight.Medium`、色 `colorScheme.onSurface`；副文本 `MiuixTheme.textStyles.body2.fontSize`、色 `colorScheme.onSurfaceVariantSummary`、`padding(top = 2.dp)` | 同上 |
-| 条目行间距 | `HomeDimens.InfoRowBottom`（末行 `0.dp`） | `ui/screen/home/HomeDimens.kt` |
-| 开关 / 跳转行图标 | `Modifier.padding(end = 6.dp)`，色 `colorScheme.onBackground` | `ui/screen/settings/SettingsMiuix.kt` 等设置项 |
-| 日志行容器 | `Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp))` | `HideEnvironmentMiuix.kt` 的 `StepLogMiuix` |
+| 页面横向边距 | `LazyColumn(Modifier.padding(horizontal = 12.dp))` | `HideEnvironmentMiuix.kt` |
+| 分组卡间距 | 每张 `Card(modifier = Modifier.padding(top = 12.dp))`，**无下边距** | 同上 |
+| 卡头 / 行图标槽几何 | `HEADER_ICON_SIZE = 24.dp`、`HEADER_ICON_GAP = 20.dp`、`HEADER_SUMMARY_INSET = 44.dp`（= 24 + 20）、`HEADER_SUMMARY_END_INSET = 56.dp`（仅有 `endActions` 时） | `HideEnvironmentMiuix.kt` 顶部常量 |
+| 卡头标题 | `MiuixTheme.textStyles.headline1.fontSize` + `FontWeight.Medium`，色取 `titleColor`（卡头传 `colorScheme.primary`，行走默认 `onBackground`） | 同上 `HeaderComponentMiuix` |
+| 卡头副文本 | `MiuixTheme.textStyles.body2.fontSize`、色 `colorScheme.onSurfaceVariantSummary`、起始缩进 `HEADER_SUMMARY_INSET` | 同上 |
+| 步骤日志小字 | `SMALL_TEXT = 12.sp` | 同上 |
+| 日志行容器 | `Column(Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp))`；失败行 `colorScheme.error`、末行 `FontWeight.Medium` | `HideEnvironmentMiuix.kt` 的 `StepLogMiuix` |
+
+**两个主题的 1dp 差异（只登记，不对齐）**：Material 的组底距是 `bottom = 13.dp`，Miuix 的卡只有 `top = 12.dp`。两者各自与所属主题的其它页面一致，**不为了对齐而改动 token**。
+
+**步骤日志为什么要对齐 16dp 而不是 44dp**：`HeaderComponentMiuix` 的行有"图标列"（24dp + 20dp 间隔 = 44dp）与"文字列"两个起点，日志无法同时对齐两者；统一采用**卡内边距 16dp**（与 Material 侧一致）。
+
+**已移除但保留键**：`hide_environment_risk_size`（旧的 "61.0 → 116.8 MB" 体积行）已从 UI 移除。键保留（重命名既有 `hide_environment*` 键属禁止项），但已无任何渲染点。
+
+**`heightIn` 必须写在 `verticalScroll` 之前**：Miuix 侧的日志位于 `LazyColumn` 的 item 内，主轴方向会给无限高约束；只有先 `heightIn(max = 160.dp)` 把上界压住，`verticalScroll` 才不会在测量期抛异常。同理 Material 侧的页面外层本身就是 `verticalScroll`。
 
 底栏自身的尺寸见 `design/home-ui-review.md` 的底栏一节，本文不重复。
 
@@ -275,14 +296,14 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 
 **结论 1（defaultMinSize 的语义边界）**：`FloatingBottomBarItem` 内部把 `modifier.fillMaxHeight().weight(1f)` 挂在同一条 Modifier 链上，Row 会给 weight 子项分配**精确宽度约束**（min == max == 分配值）。`Modifier.defaultMinSize` 只抬高最小值、不会突破上层传入的 `maxWidth`，因此在精确约束下它只能作为下限保护，**不能用来保证 5 项时的可点区域**；可点区域以实际分配宽度为准。
 
-**结论 2（标签截断，两个主题行为不一致）**
+**结论 2（标签截断，两个主题行为一致）**
 
 | 主题 | 标签写法 | 长标签行为 |
 | --- | --- | --- |
-| Miuix | `Text(text = item.label, fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Visible)` | **不出现省略号**：`softWrap = false` 禁止换行、`overflow = Visible` 允许画出边界之外 → 长标签被裁切或压到相邻项上 |
+| Miuix | `Text(text = item.label, fontSize = 11.sp, lineHeight = 14.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)` | 正常省略号截断（**本次修正**：此前是 `TextOverflow.Visible`；`softWrap = false` + `Visible` 会让长标签画出边界、压到相邻项上。一处 `Ellipsis` 保护全部 5 项） |
 | Material | `Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis)` | 正常省略号截断 |
 
-「环境隐藏」4 个 CJK 字在 Miuix 底栏的宽度 ≈ 4 × 11sp = **44dp**（CJK 字形前进宽度 ≈ 1em），5 项时每项 59.2dp 可容纳，左右各余约 7.6dp。同一位置若翻译成较长的拉丁文案（16 字符 × ≈5.5dp ≈ 88dp），必然越界，且 Miuix 侧不会出现省略号。
+「环境隐藏」4 个 CJK 字在 Miuix 底栏的宽度 ≈ 4 × 11sp = **44dp**（CJK 字形前进宽度 ≈ 1em），5 项时每项 59.2dp 可容纳，左右各余约 7.6dp。同一位置若翻译成较长的拉丁文案（16 字符 × ≈5.5dp ≈ 88dp），必然越界——现在会被省略号截断，不会再压到相邻项上。
 
 **标签长度预算**：CJK ≤ 4 字，拉丁 ≤ 7 字符。默认英文资源 `hide_environment_tab` 取值为 `Hiding`，符合该预算。
 
@@ -293,7 +314,7 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 - 另有全局开关 `LocalEnableNavigationBadge` 可整体关闭角标。
 - 只要不给「环境隐藏」扩展角标，5 项下角标与标签之间不存在宽度竞争。
 
-**结论 4（Material 侧图标状态）**：`BottomBarMaterial` 的 `items` 是 `Triple(labelRes, selectedIcon, unselectedIcon)`，选中用 `Icons.Filled.*`、未选中用 `Icons.Outlined.*`（`icon = if (selected) selectedIcon else unselectedIcon`）。本次交付的 `HideEnvironmentIcon` 是**实心**矢量，只有一个，因此该项选中 / 未选中传的是同一个图标，选中态只由 `ShortNavigationBarItem` 的指示器体现，与其它项的"实心 / 描边"对比不一致。若需要完全对齐，应补一个描边变体（把两条子路径改为 `stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f` 的空心轮廓）或改用 Material 现成图标过渡——属新增交付物。
+**结论 4（Material 侧图标状态，已对齐）**：`BottomBarMaterial` 的 `items` 是 `Triple(labelRes, selectedIcon, unselectedIcon)`，选中用 `Icons.Filled.*`、未选中用 `Icons.Outlined.*`（`icon = if (selected) selectedIcon else unselectedIcon`）。此前该项选中 / 未选中传的是同一个实心图标，选中态只由 `ShortNavigationBarItem` 的指示器体现，与其它项的"实心 / 描边"对比不一致。本次交付**两个**矢量：实心 `HideEnvironmentIcon` 与描边 `HideEnvironmentIconOutlined`（`strokeLineWidth = 1.8f`、`strokeLineCap/Join = Round`，与实心变体共用同一份点表）；`BottomBarMaterial.kt` 与 `NavigationRailMaterial.kt` 的该项均已改为 `Triple(..., HideEnvironmentIcon, HideEnvironmentIconOutlined)`。Miuix 底栏不做配对，仍只用实心变体（§0.2）。
 
 **结论 5（大屏分栏）**：`useNavigationRail` 为真时改用 SideRail 而非底栏，`ui/component/bottombar/NavigationRailMaterial.kt` 已包含第 5 项；如新增更多目的地，两份 rail 文件需同步。
 
@@ -322,18 +343,23 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 | 不支持（Miuix） | `Icons.Rounded.ErrorOutline` |
 | 进入子页 | `Icons.AutoMirrored.Filled.KeyboardArrowRight` |
 | 本页 / 本项主图标 | `HideEnvironmentIcon` |
+| 一键隐藏 | Material `Icons.Filled.AutoFixHigh` / Miuix `Icons.Rounded.AutoFixHigh` |
+
+**图标角色规则（本次收敛）**：一角色一图标、跨角色不复用、同角色内重复允许。分类固定为 `Extension`（module）/ `LayersClear`（pathmask）/ `BugReport`（detector）/ `Info`（data 与状态行）；状态行只用 `Info` / `CheckCircle` / `Warning` / `RestartAlt`；`Security` 只留给 SELinux 开关，`BugReport` 只留给检测 App 相关（快捷安装卡头 + detector 分类）。内核 umount 开关行与 pathmask 分类共用 `LayersClear` —— 已知残留：开关行未能在仓库既有图标中找到语义更贴的 Filled / Rounded 图标。
 
 ---
 
 ## 4. 实现注意事项
 
-1. **图标接入**：Miuix 侧在 `BottomBarDestination` 增项并传 `HideEnvironmentIcon`；Material 侧 `items` 为三元组，实心 / 描边变体的取舍见 §3.4 结论 4。
-2. **标签长度预算**：CJK ≤ 4 字 / 拉丁 ≤ 7 字符；Miuix 侧长标签不省略（§3.4 结论 2）。
+1. **图标接入**：Miuix 侧在 `BottomBarDestination` 增项并传 `HideEnvironmentIcon`；Material 侧 `items` 为三元组，传 `HideEnvironmentIcon` + `HideEnvironmentIconOutlined`，两份 Material bar / rail 文件必须同改（§3.4 结论 4）。
+2. **标签长度预算**：CJK ≤ 4 字 / 拉丁 ≤ 7 字符；两个主题现在都会省略号截断（§3.4 结论 2）。
 3. **每项宽度下限**：`defaultMinSize(minWidth = 56.dp)` 只作下限保护，不能保证可点区域（§3.4 结论 1）。
 4. **索引一致性**：枚举顺序 = 底栏顺序 = pager 页顺序（§3.4 结论 6）。
 5. **大屏 rail**：新增目的地须同步 `NavigationRailMaterial.kt` / `NavigationRailMiuix.kt`。
 6. **不要顺手改** `ui/theme/Type.kt`（仅覆盖 `bodyLarge`）；页面排版一律引用现有 token。
-7. **两个图标文件必须同改**：`HideEnvironmentIcon.kt` 与 `hide-environment-icon.svg` 是同一份设计的手写副本，仓库没有构建期校验（§1.5）。
+7. **两个图标文件必须同改**：`HideEnvironmentIcon.kt` 与 `hide-environment-icon.svg` 是同一份设计的手写副本，仓库没有构建期校验；两个变体的 `<path d>` 必须逐字相同（§1.5、§5.2）。
+8. **字符串键冻结**：不得重命名任何既有 `hide_environment*` 键（值可改）；新增键必须同时补 `values/strings.xml` 与 `values-zh-rCN/strings.xml`。
+9. **本页不使用 `HomeDimens`**：早期版本的本文曾声称使用 `PageHorizontal` / `CardSpacing` / `CardInner` / `InfoRowBottom`，实际在 `ui/screen/hiding/**` 内零引用；Miuix 侧的真实间距值见 §3.3。
 
 ---
 
@@ -341,21 +367,25 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 
 ### 5.1 编译
 
-```bash
-cd manager
-./gradlew assembleDebug
+**不要用 `manager/gradlew`**：wrapper 会去 services.gradle.org 取发行包，本机 JDK 验不过 TLS 链（`PKIX path building failed`）。用仓库自带的本地终端脚本：
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+& "<工作区>\KernelSU-v330\_tools\build-manager.ps1" -Task ':app:assembleDebug' -NoDaemon
 ```
 
-按仓库 `AGENTS.md`，构建前必须先把 ksud 二进制放到 `manager/app/src/main/jniLibs/arm64-v8a/libksud.so`，否则构建失败。
+唯一成功信号是脚本末行的 `EXITCODE=0`。按仓库 `AGENTS.md`，构建前必须先把 ksud 二进制放到 `manager/app/src/main/jniLibs/arm64-v8a/libksud.so`（仓库内已就位），否则构建失败。另：Kotlin daemon 在本机沙箱下会因拒写 `C:\Users\ZXC\AppData\Local\kotlin\daemon\` 而报 `AccessDeniedException`，随后自动回落 `Using fallback strategy: Compile without Kotlin daemon` —— 只看回落那一次的结果即可。
 
 ### 5.2 图标两文件一致性
 
-从 `HideEnvironmentIcon.kt` 的路径命令中按出现顺序抽出浮点数，与 `design/hide-environment-icon.svg` 的 `d` 属性中按出现顺序抽出的数字逐位比较；两者必须完全相同、顺序相同，命令字母序列为：
+**两个变体各核一次**。从 `HideEnvironmentIcon.kt` 的 `hideEnvironmentSubpaths()` 中按出现顺序抽出浮点数（实心与描边变体共用这一份，故点表本身只需核对一次），与 `design/hide-environment-icon.svg` 里 `#hide-environment-filled` **和** `#hide-environment-outlined` 两个 `d` 属性中按出现顺序抽出的数字逐位比较；三者必须完全相同、顺序相同，命令字母序列为：
 
 ```
 moveTo, curveTo, lineTo, curveTo, lineTo, lineTo, lineTo, close,
 moveTo, lineTo, lineTo, lineTo, close
 ```
+
+描边属性也要一一对应：Kotlin `stroke = SolidColor(Color.Black)` ↔ SVG `stroke="#000000"`；`strokeLineWidth = 1.8f` ↔ `stroke-width="1.8"`；`StrokeCap.Round` ↔ `stroke-linecap="round"`；`StrokeJoin.Round` ↔ `stroke-linejoin="round"`。实心变体则核对 `fill = SolidColor(Color.Black)` ↔ `fill="#000000"` 与 `PathFillType.EvenOdd` ↔ `fill-rule="evenodd"`。
 
 ### 5.3 布局实测
 
@@ -383,9 +413,10 @@ moveTo, lineTo, lineTo, lineTo, close
 | 是否落在 2..22 安全区 | x ∈ [3.75, 20.25] ⊂ [2, 22]；y ∈ [2.2, 21.8] ⊂ [2, 22] |
 | 填充率（解析估算） | 盾面积 ≈ 255 dp²（矩形段 152.6 + 顶部含圆肩 ≈ 36.4 + 底部三角 66.0）；挖空 3.000 × 13.293 ≈ 39.9 dp² → 保留 ≈ 215 dp²，填充率 ≈ 84% |
 
-## 附录 B. 已知限制（待验证）
+## 附录 B. 已知限制
 
-1. 图标几何已按 §附录 A 解析验算，但 `PathFillType.EvenOdd` 在 Compose 运行时渲染下的表现未做验证；应在预览或真机上确认一次。斜条右下角到右下折面的余量只有 1.50dp，是全图最紧的一处，建议在低密度屏（mdpi 24px）上专门确认不会被误读为"盾被切断"。
-2. 5 项底栏的实际布局按 §3.4 的公式推得，未在 360dp 宽度设备上实测——**待验证**。
-3. 各语言翻译标签的实际长度取决于 `strings.xml` 取值；Miuix 侧长标签不省略（§3.4 结论 2）——**待验证**。
-4. Material 侧选中 / 未选中使用同一实心图标，与其余项的实心 / 描边对比不一致（§3.4 结论 4）——**待验证**（属设计取舍）。
+1. **EvenOdd / 描边的运行时渲染未在真机确认**：图标几何已按附录 A 解析验算，但 `PathFillType.EvenOdd` 与 1.8dp 描边变体在 Compose 运行时下的实际表现未经真机确认。斜条右下角到右下折面的余量只有 1.5041dp，是全图最紧的一处，建议在低密度屏（mdpi 24px）上专门确认不会被误读为"盾被切断"。
+2. **5 项底栏的 360dp 实测未做**：每项 59.2dp 由 §3.4 的公式推得，未在 360dp 宽度设备上实测（当前无连接设备）。
+3. **逐语言标签长度未核**：Miuix 侧已改为 `TextOverflow.Ellipsis`，行为已与 Material 一致（§3.4 结论 2）；但各语言 `strings.xml` 中 `hide_environment_tab` 的实际取值长度仍未逐语言核对长度预算。
+4. **Material 侧描边图标的光学重量未目视确认**：`HideEnvironmentIconOutlined` 已接入 `BottomBarMaterial.kt` 与 `NavigationRailMaterial.kt`（§3.4 结论 4），真机上是否与其余四项的描边图标重量一致需要目视确认。
+5. **Miuix 侧没有 app bar 刷新入口**：只有状态卡内一条（§3.1）。是否补齐取决于 `top.yukonga.miuix.kmp.basic.TopAppBar` 是否提供 end-action 槽——该库在本仓库内未核实，属已知不对称。
