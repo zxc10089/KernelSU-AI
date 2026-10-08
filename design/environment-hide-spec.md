@@ -395,6 +395,47 @@ moveTo, lineTo, lineTo, lineTo, close
 
 ---
 
+## 6. 评审结论：按优先级的调整项
+
+评审对象是本页的两个主题实现（`ui/screen/hiding/HideEnvironmentMiuix.kt`、`ui/screen/hiding/HideEnvironmentMaterial.kt`）及其数据来源（`data/repository/HidingPackRepository.kt`、`ui/viewmodel/HideEnvironmentViewModel.kt`、`ui/screen/hiding/HideEnvironmentUiState.kt`）。
+
+排序依据：**先修「用户第一眼看不出答案」与「两处真值互相矛盾」，再修状态完整性，最后才是视觉细节**。
+
+### P0 — 信息层级与真值矛盾
+
+| # | 问题 | 调整 | 落地 |
+| --- | --- | --- | --- |
+| P0-1 | 运行模式有两个真值源：横幅的 `isLkmMode: Boolean` 与状态卡的 `runtimeMode: HidingRuntimeMode`，二者可互相矛盾；布尔默认 `false` 会把「内核没应答」显示成「非 LKM 模式」 | 模式只在横幅标一次（单一出口），删除状态卡里那份；内核不应答必须落 `HidingRuntimeMode.Unknown` 三态，禁止用默认 `false` 的布尔替代 | `HideEnvironmentMaterial.kt`、`HideEnvironmentMiuix.kt`；枚举定义在 `HideEnvironmentUiState.kt` |
+| P0-2 | 分区顺序与「首要问题」不符：横幅曾是第 4 区，用户先看到的是开关区 | 重排为 8 区：①运行模式横幅 ②环境状态总览 ③能力不支持提示 ④隐藏开关区 ⑤一键隐藏 ⑥快速安装 ⑦隐藏资源包列表 ⑧风险与许可 | 两个主题按同一顺序（§3.1） |
+| P0-3 | 唯一刷新入口曾在资源包卡末行，360dp 上落在首屏之外 | 刷新入口回到状态卡内（Miuix `RefreshPreference`；Material 另有 `LargeFlexibleTopAppBar` actions 一处，属有意保留的不对称） | 同上 |
+| P0-4 | 风险与许可曾是状态卡中的一行，被读成「状态」而非「承诺」 | 移出状态卡，页尾独立成块（第 8 区） | 同上 |
+
+### P1 — 状态完整性
+
+| # | 问题 | 调整 | 落地 |
+| --- | --- | --- | --- |
+| P1-1 | 模块安装归档落在 `/data/adb/modules_update`（`ksud module list` 会把该项的 `update` 标成 `"true"`），页面此前仍显示「已安装」 | `HidingPackInstallState` 增加 `PendingReboot`：该行显示 `hide_environment_pack_reboot_hint`、隐藏安装按钮、勾选项置灰 | `HideEnvironmentUiState.kt` |
+| P1-2 | 六个 PathMask 变体共用 `moduleId = pathmask` 且 order 都是 60，装错会互相覆盖；「没有一条匹配当前内核」时曾静默展示六条几乎相同的行 | 无匹配时插入 `hide_environment_onekey_no_branch`（图标 `Warning`），并把每个变体的 `branch` 追加到该行 summary | `HideEnvironmentMaterial.kt`、`HideEnvironmentMiuix.kt` |
+| P1-3 | 运行模式标签只有一态配色，`Unknown` 与 `GkiBuiltIn` 视觉上不可区分 | `StatusTag` 三态三色：`Unknown` → `errorContainer` / `onErrorContainer`；`Lkm` → `primary` / `onPrimary`；`GkiBuiltIn` → `tertiaryContainer` / `onTertiaryContainer`（三对色两个主题均已核实存在；`ui/theme/ThemeExt.kt:64-86` 对这些色统一做 `animateColor`） | 同上 |
+| P1-4 | 资源包条目缺少按运行模式过滤，`GkiBuiltIn` 下仍列出仅 LKM 可用的条目 | `visibleEntries = filter { it.appliesTo(runtimeMode) }`；匹配集为空时 `bundleEntries` 展示全部 6 个变体 | `HideEnvironmentUiState.kt` |
+
+### P2 — 视觉一致性
+
+| # | 问题 | 调整 | 落地 |
+| --- | --- | --- | --- |
+| P2-1 | 底栏第 5 项选中 / 未选中传的是同一个实心图标，与其它四项的「实心 / 描边」配对不一致 | 交付两个矢量：实心 `HideEnvironmentIcon` + 描边 `HideEnvironmentIconOutlined`（`strokeLineWidth = 1.8f`、`Round` cap/join，共用同一份点表）；`BottomBarMaterial.kt` 与 `NavigationRailMaterial.kt` 的该项均改为 `Triple(..., HideEnvironmentIcon, HideEnvironmentIconOutlined)`。Miuix 底栏不做配对（只用实心），见 §0.2 | `ui/icon/HideEnvironmentIcon.kt` |
+| P2-2 | 底栏标签用 `TextOverflow.Visible` + `softWrap = false`，长标签会画出边界压到相邻项上 | 改 `TextOverflow.Ellipsis`（一处 `Ellipsis` 保护全部 5 项） | `ui/component/bottombar/BottomBarMiuix.kt` |
+| P2-3 | 卡头 / 副文本 / 日志的缩进与字号各自散落 | 提为常量并统一：`HEADER_ICON_SIZE = 24.dp`、`HEADER_ICON_GAP = 20.dp`、`HEADER_SUMMARY_INSET = 44.dp`、`HEADER_SUMMARY_END_INSET = 56.dp`、`SMALL_TEXT = 12.sp`；步骤日志统一用**卡内边距 16dp**（不跟 44dp，因为日志无法同时对齐「图标列」与「文字列」两个起点） | `HideEnvironmentMiuix.kt` |
+| P2-4 | 步骤日志位于 `LazyColumn` 的 item 内，主轴方向会拿到无限高约束，`verticalScroll` 会在测量期抛异常 | 顺序固定为 `heightIn(max = 160.dp)` **先于** `verticalScroll` | 同上 |
+| P2-5 | 旧的体积行 `hide_environment_risk_size`（"61.0 → 116.8 MB"）已无意义 | 从 UI 移除渲染点；键**保留**（重命名既有 `hide_environment*` 键属禁止项） | 同上 |
+
+### 只登记、不对齐的两处（有意保留）
+
+1. **两个主题的 1dp 组底距差异**：Material 的组底距是 `bottom = 13.dp`，Miuix 的卡只有 `top = 12.dp`。两者各自与所属主题的其它页面一致，不为对齐而改 token。
+2. **刷新入口数量的不对称**：Miuix 的 `TopAppBar` 来自 `top.yukonga.miuix.kmp.basic`，其 end-action 槽未在本仓库核实，故 Miuix 只保留状态卡内一处。
+
+---
+
 ## 附录 A. 几何自洽性验算
 
 以下数值由 §1.2 的点表直接推得，可用于回归核对：
