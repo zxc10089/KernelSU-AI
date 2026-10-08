@@ -385,6 +385,7 @@
 <string name="hide_environment_props_module_local_hint">由本地终端安装</string>
 <string name="hide_environment_props_row_ok">已应用</string>
 <string name="hide_environment_props_row_same">无需修改</string>
+<string name="hide_environment_props_row_pending">未生效</string>
 <string name="hide_environment_props_row_failed">失败</string>
 <string name="hide_environment_zygisk_title">Zygisk 加固</string>
 <string name="hide_environment_zygisk_denylist">拒绝列表</string>

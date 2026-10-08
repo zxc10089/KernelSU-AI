@@ -937,7 +937,8 @@ private fun propsOutcomeLabel(outcome: PropsOutcome): String = when (outcome) {
     PropsOutcome.Applied -> stringResource(id = R.string.hide_environment_props_row_ok)
     PropsOutcome.Same -> stringResource(id = R.string.hide_environment_props_row_same)
     PropsOutcome.Failed -> stringResource(id = R.string.hide_environment_props_row_failed)
-    // 未知也显式渲染：渲染成中性标签而不是「已应用」，读不到不等于已生效。
+    // 未生效与未知都显式渲染：读不到、没落实，都不是「已应用」。
+    PropsOutcome.Pending -> stringResource(id = R.string.hide_environment_props_row_pending)
     PropsOutcome.Unknown -> stringResource(id = R.string.hide_environment_status_unknown)
 }
 

@@ -117,7 +117,9 @@ class HideEnvironmentViewModel(
             "ro.kernel.qemu" to "0",
             "ro.boot.qemu" to "0",
             "ro.hardware.virtual_device" to "0",
-            "sys.usb.adb.disabled" to "1",
+            // 刻意省略报告 §4.1 原表里的 `sys.usb.adb.disabled`（原表为 1）：本机原厂值就是 0，
+            // 写它等于偏离原厂值而多留一条痕迹；且该名字在本厂商 USB 栈里的语义未知，若被采信
+            // 可能关掉 USB ADB —— 而那是本流水线唯一的控制与恢复通道。隐藏管道只对它只读探查。
             "service.adb.root" to "0",
             "service.adb.tcp.port" to "-1",
         )
@@ -415,11 +417,12 @@ class HideEnvironmentViewModel(
             PROPS_DELETED.map { PropsRow(it, "") }
         val lookup = PROPS_EXPECTED.map { (name, _) -> name } + PROPS_DELETED
         // resetprop 的转储是 `[name]: [value]`；值里的换行会被转义成字面 `\n`，因此一行一条不会串行。
+        // 绝不要用 sed 的 N;$!ba 把整个转储先拼成一行再按行过滤：实测 3480 行的转储会被折叠成
+        // 一条，过滤器对任何属性都匹配不上、actual 恒为空，而「读不到」在下面会被渲染成结论。
         // 每个被查名字无条件回一行 `D=`，这样「转储里没有」与「转储根本没回答」不会混为一谈
         // （Android 的 getprop 风格转储对不存在的名字不会输出任何东西）。
         val script = "lookup=\"" + lookup.joinToString(" ") + "\"\n" +
             "( " + RESETPROP_PATH + " 2>/dev/null || resetprop 2>/dev/null ) " +
-            "| sed -e ':a' -e 'N' -e '\$!ba' -e 's/\\n/\\\\n/g' " +
             "| while IFS= read -r line; do " +
             "name=\${line%%:*}; name=\${name#[}; name=\${name%]}; " +
             "value=\${line#*: }; value=\${value# }; value=\${value#[}; value=\${value%]}; " +
@@ -444,36 +447,45 @@ class HideEnvironmentViewModel(
                 line.startsWith("D=") -> dumpAnswered = true
             }
         }
+        // 模块是否安装必须先问：只有模块真的在跑，才能把「值已经是目标值」记成是我们做的。
+        val moduleList = runRootCommand(shell, "ksud module list 2>/dev/null").orEmpty()
+        val moduleInstalled = moduleList.contains("\"id\":\"$PROPS_MODULE_ID\"") ||
+            moduleList.contains("\"id\": \"$PROPS_MODULE_ID\"")
         val rows = if (!dumpAnswered) {
             // 属性转储本身没回答（resetprop 缺失/被拒）：所有行的结果必须停在「未知」。
             unknownRows
         } else {
-            // 设值项：转储里没有它 = 目标值已生效；有但不同 = 设备原值仍在，无需修改。
+            // 设值项：resetprop 写入后属性依然留在转储里，所以「转储里没有它」只说明它压根不存在，
+            // 绝不能读成「已生效」。目标值没落实就是 Pending；落实了也要看是谁落实的。
             PROPS_EXPECTED.map { (name, expected) ->
                 val current = actual[name]
                 PropsRow(
                     name = name,
                     expected = expected,
                     actual = current.orEmpty(),
-                    outcome = if (current == null) PropsOutcome.Applied else PropsOutcome.Same,
+                    outcome = when {
+                        current == null -> PropsOutcome.Pending
+                        current != expected -> PropsOutcome.Pending
+                        moduleInstalled -> PropsOutcome.Applied
+                        else -> PropsOutcome.Same
+                    },
                 )
             } + PROPS_DELETED.map { name ->
                 val current = actual[name]
-                // 删除项：转储里还有 = 尚未清理（无需修改），没有 = 已清理完成。
+                // 删除项：转储里还有 = 尚未清理；没有 = 目标状态已达成。
                 PropsRow(
                     name = name,
                     expected = "",
                     actual = current.orEmpty(),
-                    outcome = if (current == null) PropsOutcome.Applied else PropsOutcome.Same,
+                    outcome = when {
+                        current != null -> PropsOutcome.Pending
+                        moduleInstalled -> PropsOutcome.Applied
+                        else -> PropsOutcome.Same
+                    },
                 )
             }
         }
-        val moduleList = runRootCommand(shell, "ksud module list 2>/dev/null").orEmpty()
-        return PropsStatus(
-            rows = rows,
-            moduleInstalled = moduleList.contains("\"id\":\"$PROPS_MODULE_ID\"") ||
-                moduleList.contains("\"id\": \"$PROPS_MODULE_ID\""),
-        )
+        return PropsStatus(rows = rows, moduleInstalled = moduleInstalled)
     }
 
     private data class PropsStatus(val rows: List<PropsRow>, val moduleInstalled: Boolean)

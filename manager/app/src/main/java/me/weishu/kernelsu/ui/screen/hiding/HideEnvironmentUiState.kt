@@ -94,11 +94,18 @@ data class SusfsProbe(
     val note: String = "",
 )
 
-/** Outcome of one property-laundering row; [Unknown] means the probe could not answer. */
+/**
+ * Outcome of one property-laundering row. [Unknown] means the probe could not answer;
+ * [Pending] means the probe did answer and the target value is not in place yet (the property
+ * is absent, or the device still holds its original value). [Applied] is reserved for rows
+ * where the laundering module is actually installed, so a row can never read as "we applied
+ * this" without that evidence.
+ */
 enum class PropsOutcome {
     Unknown,
     Same,
     Applied,
+    Pending,
     Failed,
 }
 
