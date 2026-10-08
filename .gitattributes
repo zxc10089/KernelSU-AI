@@ -1,1 +1,9 @@
 *.bat eol=crlf
+
+# Shell scripts must stay LF. core.autocrlf=true would otherwise rewrite them to CRLF
+# on checkout, and a CR before every newline breaks them on Android:
+#   * userspace/ksud/src/installer.sh is include_str!-embedded into ksud, so CRLF there
+#     ships a broken installer inside the APK;
+#   * _tools/hiding-props-module/*.sh are zipped verbatim into a KernelSU module, where
+#     the CR lands inside the shebang and every command line.
+*.sh text eol=lf
