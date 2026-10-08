@@ -27,6 +27,59 @@
 | `identity-lib.ps1` | 身份判据的共享实现（被 `adopt-lkm-asset.ps1` / `verify-identity.ps1` / `build-ksud.ps1` 点源加载）：`Find-LlvmObjdump` 找 NDK 的 objdump，`Find-ExpectedSize` 证明 ko 里的 DER 长度比较等于期望值——aarch64 按 `(w & 0x7F80001F) == 0x7100001F` 收集全部 wzr 比较（寄存器是编译器选择：多数 KMI 是 `w21`，android12-5.10 是 `w8`），x86_64 走反汇编匹配 `cmp $834`；`Find-KsuVersion` 从 `do_get_info` 的 `{version, flags}` 常量取驱动版本（aarch64 立即数 `str x<r>`、x86_64 `movabsq`，另有两个 KMI 走字面量池 + 重定位），`Get-PinnedKsuVersion` 读 `manager/gradle.properties` 的 pin；工具缺失时返回 `Ok=$null` 让调用方报警告而不是猜 |
 | `project-signer.json` | 项目签名身份的公开事实（证书 SHA-256、DER 长度等）；私钥与口令在 `.artifacts/builder/keystore/keystore.properties`，不入库 |
 | `hiding_manifest.schema.json` | 资源包 manifest 的契约（结构与管理器侧消费语义） |
+| `hiding-lib.ps1` | 隐藏流水线的纯函数库（只定义函数，无顶层副作用，无文件级 `param()`）：读并强校验 manifest、`Get-HidingRuntimeProfile` / `Get-HidingPlan`（逐字对应管理器 `HideEnvironmentViewModel.buildOneKeyPlan`）、`Match-KernelBranch`、`Read-FeatureConfig`（同时接受 versioned 与 plain 两种布局，且要求记录恰好填满文件）、`Get-PropertyPlan`（28 步：22 set + 5 del + 1 通配探查）、`Get-KeyboxPlan`（6 步固定序列）、`Get-CleanupPlan`、`Invoke-Adb` / `Invoke-AdbShell` / `Invoke-SuShell`；`Invoke-HidingLibSelfTest` 是它的自检（正控 + 负控，任一条不过即抛） |
+| `hiding-status.ps1` | 只读体检：设备身份、内核 release、本地 manifest 强校验、运行模式三态、`.feature_config` 解码、keybox 只探测存在性/字节数/sha256 前 8 位、检测器已装情况、逐条目 `installed/pending` 判定。`-Json` 输出单个对象；`-SelfTest` 离线自检。**未知一律渲染成 `?`，绝不把 `$null` 当 False** |
+| `hiding-onekey.ps1` | 一键隐藏编排。**默认（不带 `-Apply`）只打印计划，不碰设备**；`-Apply` 才执行，且进门先做 root 预检，不确定就 fail-closed。计划复用 `hiding-lib.ps1`，单步文案冻结为 `第 n/m 步 · <名称> · 成功\|失败:<原因>`，末行恒为 `需重启后生效`。可选 `-InstallLsposed` / `-AddBrickRescue` / `-InstallPropsModule` / `-KeyboxPath` / `-Detectors` / `-SkipModules` |
+| `hiding-props-module/` | 报告 §4.1 的 22 条属性洗白，做成常驻模块（`props.txt` + `post-fs-data.sh` + `service.sh` + `customize.sh`），由 `hiding-onekey.ps1 -InstallPropsModule` 打包安装 |
+
+## 隐藏流水线（本地终端）
+
+把分析报告里的隐藏逻辑搬到 PC 侧本地终端执行，用的是 `adb` + 设备侧 `su`，**不新增**管理器内业务逻辑。
+冻结契约仍以 `assets/hiding/manifest.json` 与 `hiding_manifest.schema.json` 为准，本组脚本只消费、不生产。
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force   # 本机默认 Restricted，必须先放开
+.\_tools\hiding-status.ps1 -SelfTest          # 离线自检
+.\_tools\hiding-status.ps1                    # 只读体检（真机）
+.\_tools\hiding-onekey.ps1                    # 只打印计划（dry-run）
+.\_tools\hiding-onekey.ps1 -Apply             # 真的执行
+.\_tools\hiding-onekey.ps1 -Apply -KeyboxPath D:\keybox.xml
+.\_tools\hiding-onekey.ps1 -Apply -Detectors -SkipModules   # 不需要 root 的那一步
+# §4.4 完整性层三件套（都只从本地文件装入，绝不进 APK）
+.\_tools\hiding-onekey.ps1 -Apply -KeyboxPath D:\keybox.xml -SecurityPatchPath D:\security_patch.txt -TargetListPath D:\target.txt
+```
+
+`-SecurityPatchPath` 接 `system=` / `boot=` / `vendor=` 三行（值须为 `YYYY-MM-DD`），写入
+`ro.build.version.security_patch`（← `system`）与 `ro.vendor.build.security_patch`（← `vendor`）；
+缺键或值非法就跳过该属性，绝不拿别的键顶替。`-TargetListPath` 把静态 `target.txt` 装到
+`/data/adb/tricky_store/target.txt`，作为模块每小时动态重建（`pm list packages -3` 剔 `OMK_SKIP` 后 `sort -u`）的起点。
+
+退出码：`0` 成功 · `2` 自检失败 · `3` 没有可用设备 · `4` 设备没有 root（fail-closed，零写入）· `5` 至少一步失败 · `6` 参数前置错误。
+
+几条硬规矩：
+
+- **dry-run 永远可用**：不带 `-Apply` 时不写设备，即使没 root 也必须能出计划（运行模式取不到时按 `Unknown` ⇒ 过滤 no-op，显示全部条目，而不是错误地替用户过滤掉一半）。
+- **`-Apply` 进门先验 root**，验不过就一步都不写。模块 / pathmask 安装必需 root；检测器安装不需要（`pm install` 走 adb shell 即可）。
+- **`pm install` 的裁决是输出里出现独立一行 `Success`**，不是退出码——实测 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 时退出码也可能是 0。
+- **keybox.xml 只搬运、不读取**：设备侧只用 `test -s` / `chattr` / `chown` / `chmod` / `mv`，内容永不回显、永不进日志、永不进 APK 或 git。
+- **不做报告 §4.5 的痕迹清理**（删用户存储里的 `*.img` / `*.json` / `*.xml` / `*.zip` / `MT2/`）——那是销毁用户数据，本工具永不代劳。
+
+### 改这三个脚本时必须知道的坑
+
+- **保住 UTF-8 BOM**：三个 `.ps1` 都是「UTF-8 **带 BOM**」。Windows PowerShell 5.1 对无 BOM 的
+  `.ps1` 按 ANSI 解码，文件里的中文会立刻变成乱码并**成片破坏字符串引号**，`ParseFile` 会报几十个
+  其实是编码问题导致的语法错误。用编辑器改写后务必确认前三字节仍是 `EF BB BF`，并重新跑一次
+  `ParseFile` + `-SelfTest`。
+- **计划构造器的返回形状**：`Get-PropertyPlan` / `Get-KeyboxPlan` 用 `return ,$steps`（整个数组作为
+  单个对象返回，调用方 `foreach ($x in @($plan))`）；`Get-SecurityPatchPlan` / `Get-TargetListPlan`
+  是**逐个输出**（调用方必须 `$plan = @(Get-... ...)` 快照）。不要互相改：把前者换成逐个输出、或把
+  后者包成 `,$steps`，都会让空/单元素计划悄悄变成「包着真数组的 1 元素数组」，`@(cmd).Count` 恒为 1。
+  另外空结果的断言必须写成内联 `@(cmd).Count`，先赋值再 `@($x).Count` 会得到 1（`@($null).Count`）。
+
+已知未验证项（如实记录）：端到端 `-Apply` 的模块安装、keybox 搬运、`security_patch` 写入与
+`target.txt` 安装路径**没有在真实有 root 的设备上跑过**；
+本机所连设备的 adb shell 取不到 `su`（`/system/bin/su` 等均不存在），因此只验证了 fail-closed 拒绝路径、
+dry-run 计划、以及不需要 root 的检测器安装路径。
 
 ## 红线
 

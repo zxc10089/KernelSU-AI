@@ -1,0 +1,6 @@
+id=ksu_hide_props
+name=KSU Hide Props
+version=1.0.0
+versionCode=1
+author=KernelSU-v330 local-terminal pipeline
+description=Re-applies the hiding pipeline's system property table on every boot. Installed by _tools/hiding-onekey.ps1. Deliberately NOT part of assets/hiding/manifest.json, because the pack category set is closed (module/pathmask/detector/data).

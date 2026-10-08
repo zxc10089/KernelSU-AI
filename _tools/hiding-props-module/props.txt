@@ -1,0 +1,47 @@
+# KSU Hide Props -- system property laundering table.
+#
+# Source: "VioletToolBox / hidden ROOT" analysis report, section 4.1 (property layer),
+# which transcribes yuri.zip -> Yuri/clear_all_detection_traces.sh:5763-5865.
+#
+# Format: NAME=VALUE, one per line; '#' starts a comment. This is the standard
+# system.prop shape, so ksud's own resetprop file loader parses it directly:
+#   /data/adb/ksu/bin/resetprop -n -f <this file>
+# resetprop writes straight into the property area with -n (skip property_service),
+# which is how read-only ro.* names can still be corrected after boot.
+#
+# Deletions cannot be expressed in a NAME=VALUE file. They live in post-fs-data.sh.
+
+# debug state
+ro.debuggable=0
+ro.secure=1
+ro.adb.secure=1
+ro.build.type=user
+ro.build.tags=release-keys
+
+# bootloader unlock state
+ro.boot.verifiedbootstate=green
+vendor.boot.verifiedbootstate=green
+ro.boot.flash.locked=1
+ro.boot.vbmeta.device_state=locked
+vendor.boot.vbmeta.device_state=locked
+ro.secureboot.lockstate=locked
+ro.boot.warranty_bit=0
+
+# OEM unlock state
+ro.oem_unlock_supported=0
+sys.oem_unlock_allowed=0
+ro.boot.realme.lockstate=1
+
+# SELinux state
+ro.boot.selinux=enforcing
+ro.build.selinux=1
+
+# anti-emulator
+ro.kernel.qemu=0
+ro.boot.qemu=0
+ro.hardware.virtual_device=0
+
+# ADB traces
+sys.usb.adb.disabled=1
+service.adb.root=0
+service.adb.tcp.port=-1
