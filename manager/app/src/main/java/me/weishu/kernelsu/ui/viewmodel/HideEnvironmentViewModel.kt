@@ -31,10 +31,18 @@ import me.weishu.kernelsu.data.repository.SettingsRepository
 import me.weishu.kernelsu.data.repository.SettingsRepositoryImpl
 import me.weishu.kernelsu.getKernelVersion
 import me.weishu.kernelsu.ksuApp
+import me.weishu.kernelsu.ui.screen.hiding.CleanupPlan
 import me.weishu.kernelsu.ui.screen.hiding.HideEnvironmentUiState
 import me.weishu.kernelsu.ui.screen.hiding.HidingPackInstallState
 import me.weishu.kernelsu.ui.screen.hiding.HidingPackState
+import me.weishu.kernelsu.ui.screen.hiding.KeyboxState
+import me.weishu.kernelsu.ui.screen.hiding.KeyboxStatus
 import me.weishu.kernelsu.ui.screen.hiding.OneKeyHideOptions
+import me.weishu.kernelsu.ui.screen.hiding.PropsOutcome
+import me.weishu.kernelsu.ui.screen.hiding.PropsRow
+import me.weishu.kernelsu.ui.screen.hiding.SusfsProbe
+import me.weishu.kernelsu.ui.screen.hiding.TargetListStatus
+import me.weishu.kernelsu.ui.screen.hiding.ZygiskReinforcement
 import me.weishu.kernelsu.ui.screen.hiding.branchMatchesKernel
 import me.weishu.kernelsu.ui.util.getRootShell
 import me.weishu.kernelsu.ui.util.getSELinuxStatusRaw
@@ -66,6 +74,76 @@ class HideEnvironmentViewModel(
 
         /** 随包分发的 HMA-OSS 预置配置（由 _tools\sync-hiding-pack.ps1 复制自资源包 config.json）。 */
         const val HMA_CONFIG_ASSET = "hiding/hma_config.json"
+
+        /**
+         * TrickyStore 完整性层。keybox.xml 含明文 EC 私钥：只探测存在性/字节数/sha256 前 8 位，
+         * 命令里没有任何读取内容的动作（对照 _tools\hiding-status.ps1 的只读探针）。
+         */
+        const val KEYBOX_PATH = "/data/adb/tricky_store/keybox.xml"
+        const val TARGET_LIST_PATH = "/data/adb/tricky_store/target.txt"
+
+        /** 常驻属性模块的 ksud module id（_tools\hiding-props-module\module.prop）。 */
+        const val PROPS_MODULE_ID = "ksu_hide_props"
+
+        /** resetprop 的绝对路径（ksud 多调用符号链接，hiding-lib.ps1 同样用绝对路径）。 */
+        const val RESETPROP_PATH = "/data/adb/ksu/bin/resetprop"
+
+        /** 探针在「目标不存在 / 探测不可用」时回落的哨兵，避免把空输出当成答案。 */
+        const val PROBE_SENTINEL = "KSU_HIDE_NA"
+        const val PROBE_ABSENT_PREFIX = "ABSENT:"
+
+        /**
+         * §4.1 属性洗白表：`NAME=EXPECTED`，来源 `_tools\hiding-props-module\props.txt`（22 条 set）。
+         * 只用于比对与展示期望值，App 侧永不写入。
+         */
+        val PROPS_EXPECTED: List<Pair<String, String>> = listOf(
+            "ro.debuggable" to "0",
+            "ro.secure" to "1",
+            "ro.adb.secure" to "1",
+            "ro.build.type" to "user",
+            "ro.build.tags" to "release-keys",
+            "ro.boot.verifiedbootstate" to "green",
+            "vendor.boot.verifiedbootstate" to "green",
+            "ro.boot.flash.locked" to "1",
+            "ro.boot.vbmeta.device_state" to "locked",
+            "vendor.boot.vbmeta.device_state" to "locked",
+            "ro.secureboot.lockstate" to "locked",
+            "ro.boot.warranty_bit" to "0",
+            "ro.oem_unlock_supported" to "0",
+            "sys.oem_unlock_allowed" to "0",
+            "ro.boot.realme.lockstate" to "1",
+            "ro.boot.selinux" to "enforcing",
+            "ro.build.selinux" to "1",
+            "ro.kernel.qemu" to "0",
+            "ro.boot.qemu" to "0",
+            "ro.hardware.virtual_device" to "0",
+            "sys.usb.adb.disabled" to "1",
+            "service.adb.root" to "0",
+            "service.adb.tcp.port" to "-1",
+        )
+
+        /**
+         * §4.1 的删除项（`post-fs-data.sh` 的删除循环）。期望值是「该属性不存在」。
+         * 报告里的 `persist.com.luckyzyx.luckytool.*` 是通配模式，resetprop 不接受通配，
+         * 只由隐藏管道枚举，App 侧不猜具体名字。
+         */
+        val PROPS_DELETED: List<String> = listOf(
+            "persist.service.adb.enable",
+            "persist.service.debuggable",
+            "persist.zygote.app_data_isolation",
+            "persist.hyperceiler.log.level",
+        )
+
+        /** §4.5② 工具缓存（精确包名路径，与 hiding-lib 的 ToolPackages 一致）。 */
+        val CLEANUP_TOOL_PACKAGES: List<String> = listOf(
+            "bin.mt.plus.canary",
+            "com.sevtinge.hyperceiler",
+            "com.luckyzyx.luckytool",
+        )
+
+        /** §4.5 编排层第 16 步的暂存目录 + 本工具自己的暂存目录。 */
+        const val CLEANUP_VIOLET_PATH = "/storage/emulated/0/violet"
+        const val CLEANUP_STAGING_PATH = "/data/local/tmp/ksu-hide"
     }
 
     init {
@@ -125,6 +203,10 @@ class HideEnvironmentViewModel(
                 .map { it.id }
                 .toSet()
 
+            // Only the manager side is read here, never the pack's own content. The pack always
+            // declares `includes.keybox = false`, so the keybox files are outside the pack.
+            val integrity = readIntegrityStatus(isFullFeatured, visibleEntries)
+
             _uiState.update { state ->
                 state.copy(
                     isFullFeatured = isFullFeatured,
@@ -157,8 +239,298 @@ class HideEnvironmentViewModel(
                     },
                     recommendedIds = recommendedIds,
                     runtimeMode = runtimeMode,
+                    keybox = integrity.keybox,
+                    targetList = integrity.targetList,
+                    susfs = integrity.susfs,
+                    propsRows = integrity.propsRows,
+                    isPropsModuleInstalled = integrity.isPropsModuleInstalled,
+                    zygisk = integrity.zygisk,
+                    cleanup = state.cleanup.copy(pendingPaths = integrity.cleanupPaths),
+                    isResumePending = integrity.isResumePending,
                 )
             }
+        }
+    }
+
+    /** 7 张新状态卡的只读结果；每一格读不到就保持 Unknown / null，绝不用 false 或 0 冒充已知。 */
+    private data class IntegrityStatus(
+        val keybox: KeyboxStatus,
+        val targetList: TargetListStatus,
+        val susfs: SusfsProbe,
+        val propsRows: List<PropsRow>,
+        val isPropsModuleInstalled: Boolean,
+        val zygisk: ZygiskReinforcement,
+        val cleanupPaths: List<String>,
+        val isResumePending: Boolean,
+    )
+
+    /**
+     * 只读探测 7 张状态卡的数据源。全程不写入设备、不读取 keybox 内容。
+     * [rootUsable] 为 false 时只有 Zygisk 的拒绝列表能回答（在 App 内读包管理器即可判定），
+     * 其余一律 Unknown。
+     */
+    private suspend fun readIntegrityStatus(
+        rootUsable: Boolean,
+        visibleEntries: List<HidingPackEntry>,
+    ): IntegrityStatus = withContext(Dispatchers.IO) {
+        val zygiskDenylist = if (!rootUsable) {
+            null
+        } else {
+            // `su -c id` 走 uid=0 才说明拒绝列表生效：root 本身被拒时该行只会回普通 uid。
+            runRootCommand(getRootShell(), "su -c id 2>/dev/null | head -n 1")
+                ?.let { it.startsWith("uid=0") }
+        }
+        val zygisk = ZygiskReinforcement(denylistEnforced = zygiskDenylist)
+
+        if (!rootUsable) {
+            return@withContext IntegrityStatus(
+                keybox = KeyboxStatus(state = KeyboxState.Unknown),
+                targetList = TargetListStatus(),
+                susfs = SusfsProbe(
+                    enabled = null,
+                    note = "探测不可用（未取得 root）：状态未知，不猜",
+                ),
+                propsRows = PROPS_EXPECTED.map { (name, expected) ->
+                    PropsRow(name = name, expected = expected)
+                } + PROPS_DELETED.map { PropsRow(name = it, expected = "") },
+                isPropsModuleInstalled = false,
+                zygisk = zygisk,
+                cleanupPaths = emptyList(),
+                isResumePending = false,
+            )
+        }
+
+        val shell = getRootShell()
+        val keybox = readKeyboxStatus(shell)
+        val targetList = readTargetListStatus(shell)
+        val susfs = readSusfsProbe(shell)
+        val props = readPropsStatus(shell)
+        val cleanupPaths = readCleanupCandidates(shell, visibleEntries)
+        val isResumePending = runRootCommand(
+            shell,
+            "ls -d /data/adb/modules_update/* 2>/dev/null | wc -l",
+        )?.trim()?.toIntOrNull()?.let { it > 0 } ?: false
+
+        IntegrityStatus(
+            keybox = keybox,
+            targetList = targetList,
+            susfs = susfs,
+            propsRows = props.rows,
+            isPropsModuleInstalled = props.moduleInstalled,
+            zygisk = zygisk,
+            cleanupPaths = cleanupPaths,
+            isResumePending = isResumePending,
+        )
+    }
+
+    /** 一条只读探针：退出码 + 全部输出行。 */
+    private data class ProbeResult(val code: Int, val lines: List<String>) {
+        val joined: String get() = lines.joinToString("\n")
+    }
+
+    private fun probe(shell: Shell, command: String): ProbeResult? = try {
+        val out = ArrayList<String>()
+        val err = ArrayList<String>()
+        val result = shell.newJob().add(command).to(out, err).exec()
+        ProbeResult(result.code, out.map { it.trim() })
+    } catch (_: Throwable) {
+        null
+    }
+
+    /**
+     * keybox 只读探针：`test -s` 存在性 + `wc -c` 字节数 + `sha256sum` 前 8 位。
+     * 永远不读内容；命令里没有 cat/head/base64 等任何会打印文件体的动作。
+     */
+    private fun readKeyboxStatus(shell: Shell): KeyboxStatus {
+        val result = probe(
+            shell,
+            "if test -s $KEYBOX_PATH; then echo \"STATE=present\"; " +
+                "echo \"SIZE=\$(wc -c < $KEYBOX_PATH 2>/dev/null || echo 0)\"; " +
+                "echo \"SHA=$(sha256sum $KEYBOX_PATH 2>/dev/null | cut -c 1-8)\"; " +
+                "else echo \"$PROBE_ABSENT_PREFIX\"; fi",
+        ) ?: return KeyboxStatus(state = KeyboxState.Unknown, source = KEYBOX_PATH)
+        if (result.code != 0) {
+            return KeyboxStatus(state = KeyboxState.Unknown, source = KEYBOX_PATH)
+        }
+        if (result.joined.contains(PROBE_ABSENT_PREFIX)) {
+            return KeyboxStatus(state = KeyboxState.Missing, source = KEYBOX_PATH)
+        }
+        val size = result.lines.firstOrNull { it.startsWith("SIZE=") }
+            ?.removePrefix("SIZE=")?.trim()?.toLongOrNull()
+        val sha = result.lines.firstOrNull { it.startsWith("SHA=") }
+            ?.removePrefix("SHA=")?.trim().orEmpty()
+        val shaOk = sha.length == 8 && sha.all { it in "0123456789abcdefABCDEF" }
+        if (!result.joined.contains("STATE=present") || size == null) {
+            // 文件在，但连字节数都取不到：存在性与内容都不可断言 ⇒ 校验失败，而不是「已装入」。
+            return KeyboxStatus(state = KeyboxState.Invalid, source = KEYBOX_PATH)
+        }
+        return KeyboxStatus(
+            state = if (size > 0L && shaOk) KeyboxState.Installed else KeyboxState.Invalid,
+            source = KEYBOX_PATH,
+            sizeBytes = size,
+            sha256Prefix = if (shaOk) sha.lowercase() else "",
+        )
+    }
+
+    /** `target.txt`：非空行数即包数量；文件不存在 = 未写入，不拿 0 冒充「已写入 0 条」。 */
+    private fun readTargetListStatus(shell: Shell): TargetListStatus {
+        val result = probe(
+            shell,
+            "if test -s $TARGET_LIST_PATH; then echo \"STATE=present\"; " +
+                "echo \"LINES=\$(grep -c -v '^[[:space:]]*\$' $TARGET_LIST_PATH 2>/dev/null || echo 0)\"; " +
+                "else echo \"$PROBE_ABSENT_PREFIX\"; fi",
+        ) ?: return TargetListStatus()
+        if (result.code != 0 || result.joined.contains(PROBE_ABSENT_PREFIX)) {
+            return TargetListStatus()
+        }
+        val count = result.lines.firstOrNull { it.startsWith("LINES=") }
+            ?.removePrefix("LINES=")?.trim()?.toIntOrNull() ?: return TargetListStatus()
+        return TargetListStatus(written = count > 0, packageCount = count)
+    }
+
+    /** SUSFS 只读探测：能证明在内核里就回 true，能证明不在就回 false，其余一律 null。 */
+    private fun readSusfsProbe(shell: Shell): SusfsProbe {
+        val result = probe(
+            shell,
+            "if test -e /proc/susfs || grep -q -i susfs /proc/kallsyms 2>/dev/null || " +
+                "grep -q -i susfs /proc/version 2>/dev/null; then echo DETECTED; else echo NOT_DETECTED; fi",
+        )
+        return when {
+            result == null || result.code != 0 ->
+                SusfsProbe(enabled = null, note = "探测不可用：状态未知，不猜")
+
+            result.joined.contains("DETECTED") ->
+                SusfsProbe(enabled = true, note = "已探测到内核侧 SUSFS 痕迹")
+
+            result.joined.contains("NOT_DETECTED") ->
+                SusfsProbe(enabled = false, note = "未探测到内核侧 SUSFS 痕迹")
+
+            else -> SusfsProbe(enabled = null, note = "探测输出无法解析：状态未知，不猜")
+        }
+    }
+
+    /** §4.1 属性表：一次只读 resetprop 查询，逐行比对，App 侧永不写入。 */
+    private fun readPropsStatus(shell: Shell): PropsStatus {
+        val unknownRows = PROPS_EXPECTED.map { (name, expected) -> PropsRow(name, expected) } +
+            PROPS_DELETED.map { PropsRow(it, "") }
+        val lookup = PROPS_EXPECTED.map { (name, _) -> name } + PROPS_DELETED
+        // resetprop 的转储是 `[name]: [value]`；值里的换行会被转义成字面 `\n`，因此一行一条不会串行。
+        // 每个被查名字无条件回一行 `D=`，这样「转储里没有」与「转储根本没回答」不会混为一谈
+        // （Android 的 getprop 风格转储对不存在的名字不会输出任何东西）。
+        val script = "lookup=\"" + lookup.joinToString(" ") + "\"\n" +
+            "( " + RESETPROP_PATH + " 2>/dev/null || resetprop 2>/dev/null ) " +
+            "| sed -e ':a' -e 'N' -e '\$!ba' -e 's/\\n/\\\\n/g' " +
+            "| while IFS= read -r line; do " +
+            "name=\${line%%:*}; name=\${name#[}; name=\${name%]}; " +
+            "value=\${line#*: }; value=\${value# }; value=\${value#[}; value=\${value%]}; " +
+            "case \" \$lookup \" in *\" \$name \"*) echo \"P=\$name=\$value\";; esac; done\n" +
+            "for n in \$lookup; do echo \"D=\$n\"; done"
+        val result = probe(shell, script)
+            ?: return PropsStatus(rows = unknownRows, moduleInstalled = false)
+        if (result.code != 0) {
+            return PropsStatus(rows = unknownRows, moduleInstalled = false)
+        }
+        val actual = HashMap<String, String>()
+        var dumpAnswered = false
+        result.lines.forEach { line ->
+            when {
+                line.startsWith("P=") -> {
+                    dumpAnswered = true
+                    val body = line.removePrefix("P=")
+                    val eq = body.indexOf('=')
+                    if (eq > 0) actual[body.substring(0, eq)] = body.substring(eq + 1)
+                }
+
+                line.startsWith("D=") -> dumpAnswered = true
+            }
+        }
+        val rows = if (!dumpAnswered) {
+            // 属性转储本身没回答（resetprop 缺失/被拒）：所有行的结果必须停在「未知」。
+            unknownRows
+        } else {
+            // 设值项：转储里没有它 = 目标值已生效；有但不同 = 设备原值仍在，无需修改。
+            PROPS_EXPECTED.map { (name, expected) ->
+                val current = actual[name]
+                PropsRow(
+                    name = name,
+                    expected = expected,
+                    actual = current.orEmpty(),
+                    outcome = if (current == null) PropsOutcome.Applied else PropsOutcome.Same,
+                )
+            } + PROPS_DELETED.map { name ->
+                val current = actual[name]
+                // 删除项：转储里还有 = 尚未清理（无需修改），没有 = 已清理完成。
+                PropsRow(
+                    name = name,
+                    expected = "",
+                    actual = current.orEmpty(),
+                    outcome = if (current == null) PropsOutcome.Applied else PropsOutcome.Same,
+                )
+            }
+        }
+        val moduleList = runRootCommand(shell, "ksud module list 2>/dev/null").orEmpty()
+        return PropsStatus(
+            rows = rows,
+            moduleInstalled = moduleList.contains("\"id\":\"$PROPS_MODULE_ID\"") ||
+                moduleList.contains("\"id\": \"$PROPS_MODULE_ID\""),
+        )
+    }
+
+    private data class PropsStatus(val rows: List<PropsRow>, val moduleInstalled: Boolean)
+
+    /** §4.5 安全子集：只收集「此刻真的存在」的候选路径，不存在的不进清单。 */
+    private fun readCleanupCandidates(
+        shell: Shell,
+        visibleEntries: List<HidingPackEntry>,
+    ): List<String> {
+        val candidates = LinkedHashSet<String>()
+        visibleEntries
+            .filter { it.category == HidingPackCategory.Detector }
+            .mapNotNull { it.packageName?.takeIf { pkg -> pkg.isNotBlank() } }
+            .forEach { candidates += "/storage/emulated/0/Android/data/$it" }
+        CLEANUP_TOOL_PACKAGES.forEach { candidates += "/storage/emulated/0/Android/data/$it" }
+        candidates += CLEANUP_VIOLET_PATH
+        candidates += CLEANUP_STAGING_PATH
+        val script = candidates.joinToString("\n") { "test -e \"$it\" && echo \"E=$it\"" }
+        val result = probe(shell, script) ?: return emptyList()
+        if (result.code != 0) return emptyList()
+        return result.lines.filter { it.startsWith("E=") }.map { it.removePrefix("E=") }
+    }
+
+    /** keybox 由本地终端 / 自备文件装入：App 内没有文件选择器与私钥处理路径，不伪造成功。 */
+    fun installKeybox() {
+        showNotImplementedToast(R.string.hide_environment_keybox_title)
+    }
+
+    /** target.txt 的原子装入由隐藏管道负责（hiding-onekey.ps1），App 侧不写结构化目标列表。 */
+    fun writeTargetList() {
+        showNotImplementedToast(R.string.hide_environment_target_title)
+    }
+
+    /** 属性洗白必须在启动期完成；App 运行中写入会留下不一致状态，因此只比对不落地。 */
+    fun applyPropsOnce() {
+        showNotImplementedToast(R.string.hide_environment_props_title)
+    }
+
+    fun installPropsModule() {
+        showNotImplementedToast(R.string.hide_environment_props_module)
+    }
+
+    /** 清痕是可恢复性最低的一步：保留给隐藏管道，App 只展示「此刻存在哪些待清路径」。 */
+    fun runCleanup() {
+        showNotImplementedToast(R.string.hide_environment_cleanup_title)
+    }
+
+    fun resumeOneKey() {
+        viewModelScope.launch {
+            refresh()
+        }
+    }
+
+    /** 尚未实现的动作统一只提示卡片标题，绝不假装成功。 */
+    private fun showNotImplementedToast(titleRes: Int) {
+        viewModelScope.launch(Dispatchers.Main) {
+            Toast.makeText(ksuApp, titleRes, Toast.LENGTH_SHORT).show()
         }
     }
 

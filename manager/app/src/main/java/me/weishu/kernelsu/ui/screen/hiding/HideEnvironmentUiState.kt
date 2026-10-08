@@ -50,6 +50,86 @@ data class OneKeyHideOptions(
     val addBrickRescue: Boolean = false,
 )
 
+/**
+ * Integrity layer of TrickyStore, read from `/data/adb/tricky_store/keybox.xml`.
+ *
+ * [Unknown] is the only honest answer while root is unavailable — it must never be collapsed into
+ * [Missing], because "not readable" and "not installed" lead to different user actions.
+ */
+enum class KeyboxState {
+    Unknown,
+    Missing,
+    Installed,
+    Invalid,
+}
+
+/**
+ * Read-only summary of the keybox file. The manager probes existence, byte size and the first eight
+ * hex digits of the SHA-256 only; the file body (a plaintext EC private key) is never read, logged
+ * or rendered.
+ */
+@Immutable
+data class KeyboxStatus(
+    val state: KeyboxState = KeyboxState.Unknown,
+    val source: String = "",
+    val sizeBytes: Long = 0L,
+    val sha256Prefix: String = "",
+    val time: String = "",
+)
+
+/** `/data/adb/tricky_store/target.txt`: whether it holds a non-empty list, and how many packages. */
+@Immutable
+data class TargetListStatus(
+    val written: Boolean = false,
+    val packageCount: Int = 0,
+)
+
+/**
+ * SUSFS probe result. [enabled] is deliberately nullable: `null` means "not detected", which is not
+ * the same claim as `false` ("detected and disabled").
+ */
+@Immutable
+data class SusfsProbe(
+    val enabled: Boolean? = null,
+    val note: String = "",
+)
+
+/** Outcome of one property-laundering row; [Unknown] means the probe could not answer. */
+enum class PropsOutcome {
+    Unknown,
+    Same,
+    Applied,
+    Failed,
+}
+
+/**
+ * One system property of the §4.1 laundering table: [name] is `resetprop`-written to [expected], and
+ * [actual] is what the device reports. The row is compared, never written, from the manager.
+ */
+@Immutable
+data class PropsRow(
+    val name: String,
+    val expected: String,
+    val actual: String = "",
+    val outcome: PropsOutcome = PropsOutcome.Unknown,
+)
+
+/** Zygisk hardening flags. Each flag is tri-state; `null` must render as an explicit "unknown". */
+@Immutable
+data class ZygiskReinforcement(
+    val denylistEnforced: Boolean? = null,
+    val memoryIsolation: Boolean? = null,
+    val linkerBlocked: Boolean? = null,
+)
+
+/** Safe-subset trace cleanup: the paths that exist right now, plus the run log. */
+@Immutable
+data class CleanupPlan(
+    val pendingPaths: List<String> = emptyList(),
+    val log: List<String> = emptyList(),
+    val isRunning: Boolean = false,
+)
+
 @Immutable
 data class HideEnvironmentUiState(
     val isFullFeatured: Boolean = false,
@@ -90,6 +170,27 @@ data class HideEnvironmentUiState(
     val isQuickRunning: Boolean = false,
     val quickSelectedIds: Set<String> = emptySet(),
     val quickLog: List<String> = emptyList(),
+
+    // Integrity layer (TrickyStore keybox / target list). Read only, contents never touched.
+    val keybox: KeyboxStatus = KeyboxStatus(),
+    val targetList: TargetListStatus = TargetListStatus(),
+
+    // SUSFS probe (read only)
+    val susfs: SusfsProbe = SusfsProbe(),
+
+    // Property laundering (§4.1). Rows are compared; nothing is written from the app.
+    val propsRows: List<PropsRow> = emptyList(),
+    val isPropsRunning: Boolean = false,
+    val isPropsModuleInstalled: Boolean = false,
+
+    // Zygisk hardening (read only, tri-state per flag)
+    val zygisk: ZygiskReinforcement = ZygiskReinforcement(),
+
+    // Trace cleanup (safe subset)
+    val cleanup: CleanupPlan = CleanupPlan(),
+
+    /** True while the boot-time one-key plan is still pending, i.e. the resume card is shown. */
+    val isResumePending: Boolean = false,
 ) {
     /** Every entry of the pack, no matter whether it applies to this runtime mode. */
     val packEntries: List<HidingPackEntry>
@@ -175,4 +276,16 @@ data class HideEnvironmentActions(
     val onStartOneKeyHide: () -> Unit,
     val onToggleQuickEntry: (String) -> Unit,
     val onStartQuickInstall: () -> Unit,
+
+    /**
+     * Install the keybox from a user-picked local file. The manager cannot do this on its own: the
+     * keybox holds a plaintext EC private key and must come from the local terminal / a user file,
+     * so the button stays disabled until such a picker exists.
+     */
+    val onInstallKeybox: () -> Unit = {},
+    val onWriteTargetList: () -> Unit = {},
+    val onApplyPropsOnce: () -> Unit = {},
+    val onInstallPropsModule: () -> Unit = {},
+    val onRunCleanup: () -> Unit = {},
+    val onResumeOneKey: () -> Unit = {},
 )

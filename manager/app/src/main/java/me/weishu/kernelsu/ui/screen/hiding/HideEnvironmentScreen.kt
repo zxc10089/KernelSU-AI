@@ -39,6 +39,12 @@ fun HideEnvironmentPager(
         onStartOneKeyHide = viewModel::startOneKeyHide,
         onToggleQuickEntry = viewModel::toggleQuickEntry,
         onStartQuickInstall = viewModel::startQuickInstall,
+        onInstallKeybox = viewModel::installKeybox,
+        onWriteTargetList = viewModel::writeTargetList,
+        onApplyPropsOnce = viewModel::applyPropsOnce,
+        onInstallPropsModule = viewModel::installPropsModule,
+        onRunCleanup = viewModel::runCleanup,
+        onResumeOneKey = viewModel::resumeOneKey,
     )
 
     when (LocalUiMode.current) {

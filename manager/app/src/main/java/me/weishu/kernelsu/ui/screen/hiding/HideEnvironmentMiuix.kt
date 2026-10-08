@@ -37,12 +37,15 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -53,6 +56,7 @@ import me.weishu.kernelsu.data.model.HidingPackCategory
 import me.weishu.kernelsu.data.model.HidingPackEntry
 import me.weishu.kernelsu.data.model.HidingRuntimeMode
 import me.weishu.kernelsu.data.repository.isSoftRebootPreferred
+import me.weishu.kernelsu.ui.component.dialog.rememberConfirmDialog
 import me.weishu.kernelsu.ui.component.rebootlistpopup.rememberRebootAction
 import me.weishu.kernelsu.ui.component.statustag.StatusTag
 import me.weishu.kernelsu.ui.theme.LocalEnableBlur
@@ -144,8 +148,21 @@ fun HideEnvironmentPagerMiuix(
                         OneKeyHideCardMiuix(uiState, actions)
                         QuickInstallCardMiuix(uiState, actions)
                         HidingPackCardMiuix(uiState, actions)
-                        RiskNoticeCardMiuix()
                     }
+                    // Read-only integrity / hardening status. Like the environment-status card
+                    // above, these stay visible without a crowned kernel: "unknown" is a real
+                    // answer and the only honest one, so hiding them behind the full-featured
+                    // gate would be a lie of omission.
+                    KeyboxCardMiuix(uiState)
+                    TargetListCardMiuix(uiState)
+                    SusfsCardMiuix(uiState)
+                    PropsCardMiuix(uiState, actions)
+                    ZygiskCardMiuix(uiState)
+                    CleanupCardMiuix(uiState, actions)
+                    if (uiState.isResumePending) {
+                        ResumeCardMiuix(actions)
+                    }
+                    RiskNoticeCardMiuix()
                     Spacer(Modifier.height(bottomInnerPadding))
                 }
             }
@@ -710,6 +727,353 @@ private fun HeaderComponentMiuix(
                 )
             )
         }
+    }
+}
+
+/**
+ * TrickyStore keybox. Read-only by construction: the row shows existence, byte size and the first
+ * eight hex digits of the SHA-256 only. The file body is a plaintext EC private key and is never
+ * read, logged or rendered, so the manager never needs a way to display it.
+ */
+@Composable
+private fun KeyboxCardMiuix(uiState: HideEnvironmentUiState) {
+    val keybox = uiState.keybox
+    val statusLabel = when (keybox.state) {
+        KeyboxState.Installed -> stringResource(id = R.string.hide_environment_keybox_installed)
+        KeyboxState.Missing -> stringResource(id = R.string.hide_environment_keybox_missing)
+        KeyboxState.Invalid -> stringResource(id = R.string.hide_environment_keybox_invalid)
+        KeyboxState.Unknown -> stringResource(id = R.string.hide_environment_status_unknown)
+    }
+
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_keybox_title),
+            summary = null,
+            titleColor = colorScheme.primary
+        )
+        HeaderComponentMiuix(
+            icon = if (keybox.state == KeyboxState.Installed) Icons.Rounded.CheckCircle else Icons.Rounded.Info,
+            title = statusLabel,
+            // 只有 size / sha 前 8 位 / 来源三种可公开的元数据，绝不含私钥内容。
+            summary = buildList {
+                if (keybox.sizeBytes > 0L) add(keybox.sizeBytes.toString())
+                if (keybox.sha256Prefix.isNotEmpty()) {
+                    add(stringResource(id = R.string.hide_environment_sha256_short, keybox.sha256Prefix))
+                }
+                if (keybox.source.isNotBlank()) add(keybox.source)
+            }.joinToString(" · ").ifEmpty { null }
+        )
+        if (keybox.state != KeyboxState.Installed) {
+            // 说明行用 Info 而不是 Warning：这不是风险，只是「谁来装入」的归属说明。
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Info,
+                title = stringResource(id = R.string.hide_environment_keybox_local_hint),
+                summary = null
+            )
+        }
+    }
+}
+
+/** TrickyStore target list: what the module will act on. Count comes from the file, line by line. */
+@Composable
+private fun TargetListCardMiuix(uiState: HideEnvironmentUiState) {
+    val target = uiState.targetList
+
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_target_title),
+            summary = null,
+            titleColor = colorScheme.primary
+        )
+        HeaderComponentMiuix(
+            icon = if (target.written) Icons.Rounded.CheckCircle else Icons.Rounded.Info,
+            title = if (target.written) {
+                stringResource(id = R.string.hide_environment_target_written)
+            } else {
+                stringResource(id = R.string.hide_environment_target_unwritten)
+            },
+            summary = target.packageCount.toString()
+        )
+    }
+}
+
+/**
+ * SUSFS. The probe is a pure observation: the row always carries the "probe only, never writes"
+ * note so nobody reads an enabled badge as "the manager can turn it on".
+ */
+@Composable
+private fun SusfsCardMiuix(uiState: HideEnvironmentUiState) {
+    val susfs = uiState.susfs
+
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_susfs_title),
+            summary = null,
+            titleColor = colorScheme.primary
+        )
+        if (susfs.note.isNotBlank()) {
+            // 归因行：读不到就写明为什么读不到，绝不把 false / 0 当成已知。
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Info,
+                title = when (susfs.enabled) {
+                    true -> stringResource(id = R.string.hide_environment_susfs_enabled)
+                    false -> stringResource(id = R.string.hide_environment_susfs_disabled)
+                    null -> stringResource(id = R.string.hide_environment_status_unknown)
+                },
+                summary = stringResource(id = R.string.hide_environment_susfs_readonly_note) + " · " + susfs.note
+            )
+        } else {
+            HeaderComponentMiuix(
+                icon = if (susfs.enabled == true) Icons.Rounded.CheckCircle else Icons.Rounded.Info,
+                title = when (susfs.enabled) {
+                    true -> stringResource(id = R.string.hide_environment_susfs_enabled)
+                    false -> stringResource(id = R.string.hide_environment_susfs_disabled)
+                    null -> stringResource(id = R.string.hide_environment_status_unknown)
+                },
+                summary = stringResource(id = R.string.hide_environment_susfs_readonly_note)
+            )
+        }
+    }
+}
+
+/**
+ * Property laundering (§4.1). Rows are compared, never written: the table has to be applied at boot
+ * by the resident module, so the card is a mirror plus the two actions that live elsewhere.
+ */
+@Composable
+private fun PropsCardMiuix(uiState: HideEnvironmentUiState, actions: HideEnvironmentActions) {
+    val rows = uiState.propsRows
+
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_props_title),
+            summary = null,
+            titleColor = colorScheme.primary
+        )
+        if (rows.isEmpty()) {
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Info,
+                title = stringResource(id = R.string.hide_environment_status_unknown),
+                summary = null
+            )
+        } else {
+            rows.forEach { row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        // 等宽：属性名长短不一，没有对齐感就会糊成一团。
+                        text = row.name,
+                        color = colorScheme.onBackground,
+                        fontSize = SMALL_TEXT,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatusTag(
+                        label = propsOutcomeLabel(row.outcome),
+                        modifier = Modifier.padding(start = 8.dp),
+                        backgroundColor = colorScheme.secondaryContainer,
+                        contentColor = colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+        }
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_props_apply_once),
+            summary = stringResource(id = R.string.hide_environment_props_apply_hint)
+        )
+        HeaderComponentMiuix(
+            icon = if (uiState.isPropsModuleInstalled) Icons.Rounded.CheckCircle else Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_props_module),
+            summary = if (uiState.isPropsModuleInstalled) {
+                stringResource(id = R.string.hide_environment_props_module_installed)
+            } else {
+                stringResource(id = R.string.hide_environment_props_module_local_hint)
+            }
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            TextButton(
+                text = stringResource(id = R.string.hide_environment_props_apply_once),
+                // 应用一次是离线产物安装，App 内无法完成：按钮保持禁用，不伪造成交。
+                onClick = actions.onApplyPropsOnce,
+                enabled = false,
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
+        }
+    }
+}
+
+/** Zygisk hardening: three flags, each explicitly tri-state so `null` reads as "unknown", not "off". */
+@Composable
+private fun ZygiskCardMiuix(uiState: HideEnvironmentUiState) {
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_zygisk_title),
+            summary = null,
+            titleColor = colorScheme.primary
+        )
+        HeaderComponentMiuix(
+            icon = threeStateIcon(uiState.zygisk.denylistEnforced),
+            title = stringResource(id = R.string.hide_environment_zygisk_denylist),
+            summary = threeStateLabel(uiState.zygisk.denylistEnforced)
+        )
+        HeaderComponentMiuix(
+            icon = threeStateIcon(uiState.zygisk.memoryIsolation),
+            title = stringResource(id = R.string.hide_environment_zygisk_memory),
+            summary = threeStateLabel(uiState.zygisk.memoryIsolation)
+        )
+        HeaderComponentMiuix(
+            icon = threeStateIcon(uiState.zygisk.linkerBlocked),
+            title = stringResource(id = R.string.hide_environment_zygisk_linker),
+            summary = threeStateLabel(uiState.zygisk.linkerBlocked)
+        )
+    }
+}
+
+/**
+ * `null` is rendered as an explicit "unknown" label, never as the disabled one: on this page an
+ * unanswerable probe and a probe that answered "off" are different facts and must not collapse.
+ */
+@Composable
+private fun threeStateLabel(value: Boolean?): String = when (value) {
+    true -> stringResource(id = R.string.hide_environment_status_enabled)
+    false -> stringResource(id = R.string.hide_environment_status_disabled)
+    null -> stringResource(id = R.string.hide_environment_status_unknown)
+}
+
+private fun threeStateIcon(value: Boolean?): ImageVector = when (value) {
+    true -> Icons.Rounded.CheckCircle
+    false -> Icons.Rounded.Warning
+    null -> Icons.Rounded.Info
+}
+
+/** Unknown rows are labelled instead of hidden: an omitted row reads as "nothing to report". */
+@Composable
+private fun propsOutcomeLabel(outcome: PropsOutcome): String = when (outcome) {
+    PropsOutcome.Applied -> stringResource(id = R.string.hide_environment_props_row_ok)
+    PropsOutcome.Same -> stringResource(id = R.string.hide_environment_props_row_same)
+    PropsOutcome.Failed -> stringResource(id = R.string.hide_environment_props_row_failed)
+    PropsOutcome.Unknown -> stringResource(id = R.string.hide_environment_status_unknown)
+}
+
+/** Trace cleanup. The confirmation dialog gates the run; the paths are what exists right now. */
+@Composable
+private fun CleanupCardMiuix(uiState: HideEnvironmentUiState, actions: HideEnvironmentActions) {
+    val cleanup = uiState.cleanup
+    val confirmDialog = rememberConfirmDialog(onConfirm = { actions.onRunCleanup() })
+    val showConfirm = remember { mutableStateOf(false) }
+    if (showConfirm.value) {
+        confirmDialog.showConfirm(
+            title = stringResource(id = R.string.hide_environment_cleanup_title),
+            content = cleanup.pendingPaths.joinToString("\n"),
+            confirm = stringResource(id = R.string.hide_environment_cleanup_confirm),
+        )
+        showConfirm.value = false
+    }
+
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_cleanup_title),
+            summary = null,
+            titleColor = colorScheme.primary
+        )
+        if (cleanup.pendingPaths.isEmpty()) {
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.CheckCircle,
+                title = stringResource(id = R.string.hide_environment_no_cleanup),
+                summary = null
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 160.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            ) {
+                cleanup.pendingPaths.forEach { path ->
+                    Text(
+                        text = path,
+                        color = colorScheme.onSurfaceVariantSummary,
+                        fontSize = SMALL_TEXT,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+        }
+        HeaderComponentMiuix(
+            icon = Icons.Rounded.Info,
+            title = stringResource(id = R.string.hide_environment_cleanup_run),
+            summary = stringResource(id = R.string.hide_environment_cleanup_local_note)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+        ) {
+            TextButton(
+                text = stringResource(id = R.string.hide_environment_cleanup_run),
+                // 清单是只读探测的结果，与管线执行那一刻可能不同：清痕只由隐藏管道执行。
+                onClick = { showConfirm.value = true },
+                enabled = false,
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
+        }
+    }
+}
+
+/** Only rendered while a boot-time one-key plan is still pending. */
+@Composable
+private fun ResumeCardMiuix(actions: HideEnvironmentActions) {
+    Card(
+        modifier = Modifier
+            .padding(top = 12.dp)
+            .fillMaxWidth(),
+    ) {
+        ArrowPreference(
+            title = stringResource(id = R.string.hide_environment_onekey_resume),
+            summary = null,
+            startAction = { PreferenceIcon(Icons.Rounded.RestartAlt) },
+            onClick = actions.onResumeOneKey
+        )
     }
 }
 

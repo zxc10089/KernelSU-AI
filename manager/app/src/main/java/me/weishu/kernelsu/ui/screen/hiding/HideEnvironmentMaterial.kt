@@ -39,11 +39,15 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -53,6 +57,7 @@ import me.weishu.kernelsu.data.model.HidingPackCategory
 import me.weishu.kernelsu.data.model.HidingPackEntry
 import me.weishu.kernelsu.data.model.HidingRuntimeMode
 import me.weishu.kernelsu.data.repository.isSoftRebootPreferred
+import me.weishu.kernelsu.ui.component.dialog.rememberConfirmDialog
 import me.weishu.kernelsu.ui.component.material.ExpressiveScaffold
 import me.weishu.kernelsu.ui.component.material.SegmentedCheckboxItem
 import me.weishu.kernelsu.ui.component.material.SegmentedColumn
@@ -94,8 +99,20 @@ fun HideEnvironmentPagerMaterial(
                 OneKeyHideColumnMaterial(uiState, actions)
                 QuickInstallColumnMaterial(uiState, actions)
                 HidingPackColumnMaterial(uiState, actions)
-                RiskNoticeColumnMaterial()
             }
+            // Read-only integrity / hardening status. Like the environment-status card above, these
+            // stay visible without a crowned kernel: "unknown" is a real answer and the only honest
+            // one, so hiding them behind the full-featured gate would be a lie of omission.
+            KeyboxColumnMaterial(uiState)
+            TargetListColumnMaterial(uiState)
+            SusfsColumnMaterial(uiState)
+            PropsColumnMaterial(uiState, actions)
+            ZygiskColumnMaterial(uiState)
+            CleanupColumnMaterial(uiState, actions)
+            if (uiState.isResumePending) {
+                ResumeColumnMaterial(actions)
+            }
+            RiskNoticeColumnMaterial()
             Spacer(modifier = Modifier.height(bottomInnerPadding))
         }
     }
@@ -610,6 +627,390 @@ private fun HidingPackEntryMaterial(
  * Licence notice. It used to be one more row inside the environment-status card, where it read as
  * a property of the running environment; the licence is not, so it gets its own block at the end.
  */
+/**
+ * TrickyStore keybox. Read-only by construction: the row shows existence, byte size and the first
+ * eight hex digits of the SHA-256 only. The file body is a plaintext EC private key and is never
+ * read, logged or rendered, so the manager never needs a way to display it.
+ */
+@Composable
+private fun KeyboxColumnMaterial(uiState: HideEnvironmentUiState) {
+    val keybox = uiState.keybox
+    val statusLabel = when (keybox.state) {
+        KeyboxState.Installed -> stringResource(id = R.string.hide_environment_keybox_installed)
+        KeyboxState.Missing -> stringResource(id = R.string.hide_environment_keybox_missing)
+        KeyboxState.Invalid -> stringResource(id = R.string.hide_environment_keybox_invalid)
+        KeyboxState.Unknown -> stringResource(id = R.string.hide_environment_status_unknown)
+    }
+    // 只有「已装入 / 校验失败」才是设备给出的断言，才配一个着色标签；未知必须是中性态。
+    val tag = if (keybox.state == KeyboxState.Unknown) {
+        MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+    }
+
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_keybox_title),
+    ) {
+        item(key = "keybox-state") {
+            SegmentedListItem(
+                headlineContent = {
+                    StatusTag(
+                        label = statusLabel,
+                        backgroundColor = tag.first,
+                        contentColor = tag.second,
+                    )
+                },
+                supportingContent = {
+                    val summary = buildList {
+                        if (keybox.sizeBytes > 0L) add(keybox.sizeBytes.toString())
+                        if (keybox.sha256Prefix.isNotEmpty()) {
+                            add(
+                                stringResource(
+                                    id = R.string.hide_environment_sha256_short,
+                                    keybox.sha256Prefix,
+                                )
+                            )
+                        }
+                        if (keybox.source.isNotBlank()) add(keybox.source)
+                    }.joinToString(" · ")
+                    if (summary.isNotEmpty()) Text(summary)
+                },
+                leadingContent = {
+                    Icon(
+                        imageVector = if (keybox.state == KeyboxState.Installed) {
+                            Icons.Filled.CheckCircle
+                        } else {
+                            Icons.Filled.Info
+                        },
+                        contentDescription = null,
+                    )
+                },
+            )
+        }
+        if (keybox.state != KeyboxState.Installed) {
+            // 说明行用 Info 而不是 Warning：这不是风险，只是「谁来装入」的归属说明。
+            item(key = "keybox-hint") {
+                SegmentedListItem(
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_keybox_local_hint)) },
+                    leadingContent = { Icon(Icons.Filled.Info, null) },
+                )
+            }
+        }
+    }
+}
+
+/** TrickyStore target list: what the module will act on. Count comes from the file, line by line. */
+@Composable
+private fun TargetListColumnMaterial(uiState: HideEnvironmentUiState) {
+    val target = uiState.targetList
+    val tag = MaterialTheme.colorScheme.secondaryContainer to
+        MaterialTheme.colorScheme.onSecondaryContainer
+
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_target_title),
+    ) {
+        item(key = "target-state") {
+            SegmentedListItem(
+                headlineContent = {
+                    StatusTag(
+                        label = if (target.written) {
+                            stringResource(id = R.string.hide_environment_target_written)
+                        } else {
+                            stringResource(id = R.string.hide_environment_target_unwritten)
+                        },
+                        backgroundColor = tag.first,
+                        contentColor = tag.second,
+                    )
+                },
+                supportingContent = { Text(target.packageCount.toString()) },
+                leadingContent = {
+                    Icon(
+                        imageVector = if (target.written) Icons.Filled.CheckCircle else Icons.Filled.Info,
+                        contentDescription = null,
+                    )
+                },
+            )
+        }
+    }
+}
+
+/**
+ * SUSFS. The probe is a pure observation: the row always carries the "probe only, never writes"
+ * note so nobody reads an enabled badge as "the manager can turn it on".
+ */
+@Composable
+private fun SusfsColumnMaterial(uiState: HideEnvironmentUiState) {
+    val susfs = uiState.susfs
+    val tag = MaterialTheme.colorScheme.secondaryContainer to
+        MaterialTheme.colorScheme.onSecondaryContainer
+
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_susfs_title),
+    ) {
+        item(key = "susfs-state") {
+            SegmentedListItem(
+                headlineContent = {
+                    StatusTag(
+                        label = when (susfs.enabled) {
+                            true -> stringResource(id = R.string.hide_environment_susfs_enabled)
+                            false -> stringResource(id = R.string.hide_environment_susfs_disabled)
+                            null -> stringResource(id = R.string.hide_environment_status_unknown)
+                        },
+                        backgroundColor = tag.first,
+                        contentColor = tag.second,
+                    )
+                },
+                supportingContent = {
+                    Text(stringResource(id = R.string.hide_environment_susfs_readonly_note))
+                },
+                leadingContent = {
+                    Icon(
+                        imageVector = if (susfs.enabled == true) {
+                            Icons.Filled.CheckCircle
+                        } else {
+                            Icons.Filled.Info
+                        },
+                        contentDescription = null,
+                    )
+                },
+            )
+        }
+        if (susfs.note.isNotBlank()) {
+            // 归因行：读不到就写明为什么读不到，绝不把 false / 0 当成已知。
+            item(key = "susfs-note") {
+                SegmentedListItem(
+                    headlineContent = { Text(susfs.note) },
+                    leadingContent = { Icon(Icons.Filled.Info, null) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Property laundering (§4.1). Rows are compared, never written: the table has to be applied at boot
+ * by the resident module, so the card is a mirror plus the two actions that live elsewhere.
+ */
+@Composable
+private fun PropsColumnMaterial(uiState: HideEnvironmentUiState, actions: HideEnvironmentActions) {
+    val rows = uiState.propsRows
+    val tag = MaterialTheme.colorScheme.secondaryContainer to
+        MaterialTheme.colorScheme.onSecondaryContainer
+
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_props_title),
+    ) {
+        if (rows.isEmpty()) {
+            item(key = "props-empty") {
+                SegmentedListItem(
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_status_unknown)) },
+                    leadingContent = { Icon(Icons.Filled.Info, null) },
+                )
+            }
+        } else {
+            // 逐行渲染属性名与结果标签。属性名长短不一，等宽字体才排得整齐。
+            rows.forEach { row ->
+                item(key = "props-${row.name}") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = row.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatusTag(
+                            label = propsOutcomeLabel(row.outcome),
+                            backgroundColor = tag.first,
+                            contentColor = tag.second,
+                        )
+                    }
+                }
+            }
+        }
+        item(key = "props-apply") {
+            SegmentedListItem(
+                headlineContent = { Text(stringResource(id = R.string.hide_environment_props_apply_once)) },
+                supportingContent = {
+                    Text(stringResource(id = R.string.hide_environment_props_apply_hint))
+                },
+                leadingContent = { Icon(Icons.Filled.Info, null) },
+                onClick = actions.onApplyPropsOnce,
+            )
+        }
+        item(key = "props-module") {
+            SegmentedListItem(
+                headlineContent = { Text(stringResource(id = R.string.hide_environment_props_module)) },
+                supportingContent = {
+                    Text(
+                        if (uiState.isPropsModuleInstalled) {
+                            stringResource(id = R.string.hide_environment_props_module_installed)
+                        } else {
+                            stringResource(id = R.string.hide_environment_props_module_local_hint)
+                        }
+                    )
+                },
+                leadingContent = {
+                    Icon(
+                        imageVector = if (uiState.isPropsModuleInstalled) {
+                            Icons.Filled.CheckCircle
+                        } else {
+                            Icons.Filled.Info
+                        },
+                        contentDescription = null,
+                    )
+                },
+            )
+        }
+    }
+}
+
+/** Zygisk hardening: three flags, each explicitly tri-state so `null` reads as "unknown", not "off". */
+@Composable
+private fun ZygiskColumnMaterial(uiState: HideEnvironmentUiState) {
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_zygisk_title),
+    ) {
+        item(key = "zygisk-denylist") {
+            ThreeStateStatusRow(
+                label = stringResource(id = R.string.hide_environment_zygisk_denylist),
+                value = uiState.zygisk.denylistEnforced,
+            )
+        }
+        item(key = "zygisk-memory") {
+            ThreeStateStatusRow(
+                label = stringResource(id = R.string.hide_environment_zygisk_memory),
+                value = uiState.zygisk.memoryIsolation,
+            )
+        }
+        item(key = "zygisk-linker") {
+            ThreeStateStatusRow(
+                label = stringResource(id = R.string.hide_environment_zygisk_linker),
+                value = uiState.zygisk.linkerBlocked,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThreeStateStatusRow(label: String, value: Boolean?) {
+    val tag = MaterialTheme.colorScheme.secondaryContainer to
+        MaterialTheme.colorScheme.onSecondaryContainer
+    SegmentedListItem(
+        headlineContent = { Text(label) },
+        // null 走中性标签「未知」，绝不用关闭态冒充：未知和「探测到关闭」是两件事。
+        trailingContent = {
+            StatusTag(
+                label = when (value) {
+                    true -> stringResource(id = R.string.hide_environment_status_enabled)
+                    false -> stringResource(id = R.string.hide_environment_status_disabled)
+                    null -> stringResource(id = R.string.hide_environment_status_unknown)
+                },
+                backgroundColor = tag.first,
+                contentColor = tag.second,
+            )
+        },
+        leadingContent = {
+            Icon(
+                imageVector = when (value) {
+                    true -> Icons.Filled.CheckCircle
+                    false -> Icons.Filled.Warning
+                    null -> Icons.Filled.Info
+                },
+                contentDescription = null,
+            )
+        },
+    )
+}
+
+@Composable
+private fun propsOutcomeLabel(outcome: PropsOutcome): String = when (outcome) {
+    PropsOutcome.Applied -> stringResource(id = R.string.hide_environment_props_row_ok)
+    PropsOutcome.Same -> stringResource(id = R.string.hide_environment_props_row_same)
+    PropsOutcome.Failed -> stringResource(id = R.string.hide_environment_props_row_failed)
+    // 未知也显式渲染：渲染成中性标签而不是「已应用」，读不到不等于已生效。
+    PropsOutcome.Unknown -> stringResource(id = R.string.hide_environment_status_unknown)
+}
+
+/** Trace cleanup. The confirmation dialog gates the run; the paths are what exists right now. */
+@Composable
+private fun CleanupColumnMaterial(uiState: HideEnvironmentUiState, actions: HideEnvironmentActions) {
+    val cleanup = uiState.cleanup
+    val confirmDialog = rememberConfirmDialog(onConfirm = { actions.onRunCleanup() })
+    val showConfirm = remember { mutableStateOf(false) }
+    if (showConfirm.value) {
+        confirmDialog.showConfirm(
+            title = stringResource(id = R.string.hide_environment_cleanup_title),
+            content = cleanup.pendingPaths.joinToString("\n"),
+            confirm = stringResource(id = R.string.hide_environment_cleanup_confirm),
+        )
+        showConfirm.value = false
+    }
+
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        title = stringResource(id = R.string.hide_environment_cleanup_title),
+    ) {
+        if (cleanup.pendingPaths.isEmpty()) {
+            item(key = "cleanup-none") {
+                SegmentedListItem(
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_no_cleanup)) },
+                    leadingContent = { Icon(Icons.Filled.CheckCircle, null) },
+                )
+            }
+        } else {
+            cleanup.pendingPaths.forEach { path ->
+                item(key = "cleanup-$path") {
+                    Text(
+                        text = path,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+        item(key = "cleanup-run") {
+            SegmentedListItem(
+                headlineContent = { Text(stringResource(id = R.string.hide_environment_cleanup_run)) },
+                supportingContent = {
+                    Text(stringResource(id = R.string.hide_environment_cleanup_local_note))
+                },
+                leadingContent = { Icon(Icons.Filled.Info, null) },
+                // 路径清单是只读探测的结果，随时可能不同于管线执行那一刻：按钮保持禁用，
+                // 清痕只由隐藏管道执行，App 不伪造成交。
+                onClick = { showConfirm.value = true },
+            )
+        }
+    }
+}
+
+/** Only rendered while a boot-time one-key plan is still pending. */
+@Composable
+private fun ResumeColumnMaterial(actions: HideEnvironmentActions) {
+    SegmentedColumn(
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
+        content = listOf(
+            {
+                SegmentedListItem(
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_onekey_resume)) },
+                    leadingContent = { Icon(Icons.Filled.RestartAlt, null) },
+                    onClick = actions.onResumeOneKey,
+                )
+            }
+        )
+    )
+}
+
 @Composable
 private fun RiskNoticeColumnMaterial() {
     SegmentedColumn(
