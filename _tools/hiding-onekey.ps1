@@ -116,6 +116,9 @@ $AssetsRoot = Join-Path $RepoRoot 'manager\app\src\main\assets'
 $PropsModuleDir = Join-Path $scriptDir 'hiding-props-module'
 $StageDir = '/data/local/tmp/hiding'
 $RestartHint = '需重启后生效'
+# dry-run 计划行的状态字：一步都没执行，所以只能写「待执行」。
+# 严禁改成「成功」——那会把计划渲染成执行结果（真实踩过）。
+$DryRunStepStatus = '待执行'
 
 # ------------------------------------------------------------------ helpers
 
@@ -130,11 +133,14 @@ function New-StepResult {
     }
 }
 
-# 冻结文案：第 n/m 步 · <name> · 成功|失败:<error>
+# 冻结文案（执行结果）：第 n/m 步 · <name> · 成功 | 失败:<error>
+# 第三个分支只服务 dry-run 的**计划展示**（$DryRunStepStatus='待执行'）。
+# 绝不允许把未执行的步骤渲染成「成功」——那是在自报完成。
 function Format-StepLine {
     param($Step)
     if ($Step.status -ceq '成功') { return ("第 {0}/{1} 步 · {2} · 成功" -f $Step.index, $Step.total, $Step.name) }
-    return ("第 {0}/{1} 步 · {2} · 失败:{3}" -f $Step.index, $Step.total, $Step.name, $Step.error)
+    if ($Step.status -ceq '失败') { return ("第 {0}/{1} 步 · {2} · 失败:{3}" -f $Step.index, $Step.total, $Step.name, $Step.error) }
+    return ("第 {0}/{1} 步 · {2} · {3}" -f $Step.index, $Step.total, $Step.name, $Step.status)
 }
 
 function Resolve-HidingAdbPath {
@@ -270,6 +276,22 @@ function Invoke-HidingOnekeySelfTest {
     $line2 = Format-StepLine $bad
     Assert-HidingTruth -Condition ($line2 -ceq '第 3/5 步 · zygisksu · 失败:no space left') -Message ("onekey 失败文案不符：'" + $line2 + "'")
 
+    # (a2) dry-run 不得把**未执行**的步骤渲染成「成功」（真实踩过：计划行曾被喂 Status '成功'）
+    Assert-HidingTruth -Condition ($DryRunStepStatus -cne '成功' -and $DryRunStepStatus -cne '失败') -Message 'dry-run 步骤状态不得是 成功/失败'
+    $planLine = Format-StepLine (New-StepResult -Index 1 -Total 5 -Name 'hybrid_mount' -Status $DryRunStepStatus)
+    Assert-HidingTruth -Condition ($planLine -ceq '第 1/5 步 · hybrid_mount · 待执行') -Message ("dry-run 计划行文案不符：'" + $planLine + "'")
+    Assert-HidingTruth -Condition ($planLine -notmatch '成功|失败') -Message 'dry-run 计划行出现了执行结果字样'
+    # 结构闸：dry-run 代码块内不得出现任何执行结果字面量（否则就是计划冒充结果）。
+    # 定位代码块必须用**行首锚定**的正则。曾用 $src.IndexOf('if (-not $Apply) {') 去搜，
+    # 结果搜到了这条断言**自己**里的那个字面量（自指），闸门形同虚设 —— 已用反证确认过。
+    $src = [System.IO.File]::ReadAllText($PSCommandPath, (New-Object System.Text.UTF8Encoding($false)))
+    $mDry = [regex]::Match($src, '(?m)^if \(-not \$Apply\) \{')
+    if (-not $mDry.Success) { throw 'onekey 结构闸失效：找不到 dry-run 代码块，请修正本断言' }
+    $mStop = [regex]::Match($src.Substring($mDry.Index), '(?m)^\s*exit 0\b')
+    if (-not $mStop.Success) { throw 'onekey 结构闸失效：dry-run 代码块里没有 exit 0' }
+    $dryBlock = $src.Substring($mDry.Index, $mStop.Index)
+    Assert-HidingTruth -Condition ($dryBlock -notmatch '成功|失败') -Message 'dry-run 代码块里出现了 成功/失败 字面量：计划不得冒充执行结果'
+
     # (b) 末行文案冻结
     Assert-HidingTruth -Condition ($RestartHint -ceq '需重启后生效') -Message 'onekey 末行文案被改动'
 
@@ -390,11 +412,11 @@ if (-not $Apply) {
     $total = $planIds.Count + $extra.Count
     foreach ($id in $planIds) {
         $n++
-        Write-Host (Format-StepLine (New-StepResult -Index $n -Total $total -Name $id -Status '成功'))
+        Write-Host (Format-StepLine (New-StepResult -Index $n -Total $total -Name $id -Status $DryRunStepStatus))
     }
     foreach ($x in $extra) {
         $n++
-        Write-Host (Format-StepLine (New-StepResult -Index $n -Total $total -Name $x -Status '成功'))
+        Write-Host (Format-StepLine (New-StepResult -Index $n -Total $total -Name $x -Status $DryRunStepStatus))
     }
     Write-Host ''
     Write-Host $RestartHint
