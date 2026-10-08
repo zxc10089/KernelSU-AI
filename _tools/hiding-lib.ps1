@@ -516,9 +516,12 @@ function Invoke-SuShell {
         su -c 只吃**一个**参数，所以这里把 command 用单引号包成一个 argv 元素（内部单引号按 POSIX 规则
         转义为 '\''），整串作为单个参数交给 adb shell。复合命令请改用脚本推送（报告 §4.2/计划 §4.2）：
         单引号包裹后内层仍然只有一层 sh 解析，&& / 管道可以正常工作，但不要在此拼接双引号。
-        被拒的判据：退出码非 0 且输出命中 su 拒绝特征（permission denied / su: not found / …），
-        或输出直接含 "su: not found"/"su: permission denied" 这类强特征。
+        被拒的判据（必须指向 su 本身）：输出命中 "su: not found" / "su: inaccessible or not found" /
+        "su: permission denied" / "su: operation not permitted" / "usage: su" / "su: invalid option"。
         绝不静默继续：su 不可用时返回 -1，调用方必须按失败处理。
+        **不要**把裸的 'not found' / 'permission denied' 当判据：设备上任何缺失的二进制都会打印
+        "inaccessible or not found"（例如 sh: /data/adb/ksu/bin/resetprop: inaccessible or not found），
+        那样会把「resetprop 缺失」误报成「su 不可用」，属未验证归因。
     #>
     param([string]$Adb, [string]$Serial, [string]$Command)
     $ErrorActionPreference = 'Stop'
@@ -527,10 +530,13 @@ function Invoke-SuShell {
     $remote = 'su -c ' + $quoted
     $r = Invoke-AdbShell -Adb $Adb -Serial $Serial -Command $remote
     $text = (@($r.Output) -join "`n")
-    if ($r.ExitCode -ne 0 -and $text -match '(?i)(permission denied|operation not permitted|inaccessible or not found|not found|invalid option|usage: su)') {
+    # 判据必须指向 su 自身；裸 'not found' 会把任何缺失的二进制误判成 su 不可用（未验证归因）。
+    $suNamed = '(?i)(^|[\s/])su:\s*(not found|inaccessible or not found|permission denied|operation not permitted)'
+    $suUsage = '(?i)(usage:\s*su\b|su:\s*invalid option|su:\s*unknown option)'
+    if ($r.ExitCode -ne 0 -and ($text -match $suNamed -or $text -match $suUsage)) {
         return @{ ExitCode = -1; Output = @("su unavailable: " + $text) }
     }
-    if ($text -match '(?i)su:\s*(not found|permission denied)') {
+    if ($text -match $suNamed) {
         return @{ ExitCode = -1; Output = @("su unavailable: " + $text) }
     }
     return $r
@@ -951,7 +957,10 @@ function Invoke-HidingLibSelfTest {
     .DESCRIPTION
         「负向对照」的含义：该检查必须**有能力失败**。所以每个负控都同时有一个正控
         （同一路径在未破坏输入时必须成功），否则一个「什么都 throw」的实现也能骗过自检。
-        自检不需要真机：manifest 校验用临时目录里合成的最小 pack，adb/su 用例用不存在的可执行文件。
+        自检不需要真机：manifest 校验用临时目录里合成的最小 pack，adb 缺失用不存在的可执行文件，
+        su 判据用临时目录里合成的假 adb（.cmd 打印指定原文并给出指定退出码），因此 su 的
+        「不可用 / 可用 / 别的二进制缺失」三种情形都能被真正驱动，而不是只碰巧命中某个关键字。
+        返回 0（供 hiding-status.ps1 -SelfTest 直接当退出码），失败时 throw 而不会返回。
         可用 -RepoRoot 追加一次「真实 manifest」正控（hiding-status.ps1 会这样调用）。
     #>
     param([string]$RepoRoot = '')
@@ -1209,9 +1218,35 @@ function Invoke-HidingLibSelfTest {
         $a2 = Invoke-AdbShell -Adb $bogusAdb -Serial 'x' -Command 'id'
         Assert-HidingTruth -Condition ($a2.ExitCode -eq -1) -Message 'Invoke-AdbShell 负控：adb 不存在必须返回 -1'
         $a3 = Invoke-SuShell -Adb $bogusAdb -Serial 'x' -Command 'id -u'
-        Assert-HidingTruth -Condition ($a3.ExitCode -eq -1) -Message 'Invoke-SuShell 负控：su 不可用必须返回 -1'
-        Assert-HidingTruth -Condition (($a3.Output -join ' ') -match '^su unavailable:') -Message 'Invoke-SuShell 负控：输出行必须以 su unavailable: 开头'
+        Assert-HidingTruth -Condition ($a3.ExitCode -eq -1) -Message 'Invoke-SuShell 负控：adb 不存在必须返回 -1'
+        # adb 缺失**不得**被伪装成「su 不可用」——旧判据用裸 'not found' 时这里会假通过。
+        Assert-HidingTruth -Condition (($a3.Output -join ' ') -notmatch '^su unavailable:') -Message 'Invoke-SuShell 负控：adb 缺失不得伪装成 su 不可用'
         Assert-HidingThrows { Invoke-SuShell -Adb $bogusAdb -Serial 'x' -Command '' } 'Invoke-SuShell 负控：空命令必须 throw'
+
+        # 用假 adb 真正驱动 su 判据（只认指向 su 自身的特征，不认裸 'not found'）
+        $fakeDir = Join-Path ([System.IO.Path]::GetTempPath()) 'ksu-hide-fakeadb'
+        [void](New-Item -ItemType Directory -Path $fakeDir -Force -ErrorAction SilentlyContinue)
+        $mkFake = {
+            param([string]$Name, [string]$Text, [int]$Code)
+            $p = Join-Path $fakeDir $Name
+            $crlf = [string][char]13 + [string][char]10
+            $body = (@('@echo off', ('echo ' + $Text), ('exit /b ' + [string]$Code)) -join $crlf) + $crlf
+            [System.IO.File]::WriteAllText($p, $body, (New-Object System.Text.ASCIIEncoding))
+            return $p
+        }
+        $fSu = & $mkFake 'su_missing.cmd' '/system/bin/sh: su: inaccessible or not found' 1
+        $fRp = & $mkFake 'resetprop_missing.cmd' 'sh: /data/adb/ksu/bin/resetprop: inaccessible or not found' 127
+        $fOk = & $mkFake 'su_ok.cmd' 'uid=0-root' 0
+        $s1 = Invoke-SuShell -Adb $fSu -Serial 'x' -Command 'id -u'
+        Assert-HidingTruth -Condition ($s1.ExitCode -eq -1) -Message 'Invoke-SuShell 正控：su 缺失必须返回 -1'
+        Assert-HidingTruth -Condition (($s1.Output -join ' ') -match '^su unavailable:') -Message 'Invoke-SuShell 正控：su 缺失输出必须以 su unavailable: 开头'
+        $s2 = Invoke-SuShell -Adb $fRp -Serial 'x' -Command 'id -u'
+        Assert-HidingTruth -Condition ($s2.ExitCode -eq 127) -Message 'Invoke-SuShell 负控：resetprop 缺失(127) 不得被判为 su 不可用'
+        Assert-HidingTruth -Condition (($s2.Output -join ' ') -notmatch '^su unavailable:') -Message 'Invoke-SuShell 负控：resetprop 缺失不得伪装成 su 不可用'
+        $s3 = Invoke-SuShell -Adb $fOk -Serial 'x' -Command 'id -u'
+        Assert-HidingTruth -Condition ($s3.ExitCode -eq 0) -Message 'Invoke-SuShell 正控：su 可用时必须原样返回 0'
+        Assert-HidingTruth -Condition (($s3.Output -join ' ') -match 'uid=0') -Message 'Invoke-SuShell 正控：su 可用时输出必须原样保留'
+        Remove-Item -LiteralPath $fakeDir -Recurse -Force -ErrorAction SilentlyContinue
 
         # ===== 9. 三个计划构造器：形状 + §7 红线兜底 =====
         $pp = Get-PropertyPlan
