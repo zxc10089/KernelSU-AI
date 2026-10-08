@@ -14,7 +14,7 @@
       * 单步文案     = 「第 n/m 步 · <name> · 成功|失败:<error>」（schema 的 frozenLiterals）
       * 末行         = 「需重启后生效」（schema 的 frozenLiterals，必须逐字）
       * 模块安装     = ksud module install <绝对 cache 路径>，**串行**（schema 的 installStrategy）
-      * 检测器安装   = su -c "pm install -r -t --user 0 <绝对 cache 路径>"；退出码即裁决
+      * 检测器安装   = su -c "pm install -r -t --user 0 <绝对 cache 路径>"；裁决 = 输出里独立一行 Success（退出码不算数）
       * 属性洗白     = hiding-props-module 常驻模块（resetprop -n -f，见 _tools/hiding-props-module/），
                        比一次性 resetprop 更可靠：framework 重建 ro.boot.* 后 service.sh 会二次重放
       * keybox       = Get-KeyboxPlan 的 6 步固定序列（chattr -i -> 写 tmp -> chown 0:0 -> chmod 600 -> mv -> test -s）
@@ -219,6 +219,17 @@ function Test-PmInstallOutput {
     return [bool]($Output -match '(?m)^Success$')
 }
 
+# pm install 的**唯一**裁决入口：不论走 su -c 还是 adb shell，都必须同时满足
+# 「退出码 0」与「输出里有独立一行 Success」。分开判会漏掉真实存在的
+# 「退出码 0 + Failure [...]」情形（设备上实测过 INSTALL_FAILED_UPDATE_INCOMPATIBLE）。
+function Test-PmInstallDone {
+    param([int]$ExitCode, [string[]]$Output)
+    $txt = ((@($Output)) -join "`n").Trim()
+    $ok = ($ExitCode -eq 0) -and (Test-PmInstallOutput $txt)
+    $why = if ([string]::IsNullOrWhiteSpace($txt)) { "exit $ExitCode" } else { $txt }
+    return [pscustomobject]@{ Ok = $ok; Why = $why; Output = $txt }
+}
+
 # ------------------------------------------------------------------ planning
 
 function Get-OneKeyPlan {
@@ -289,6 +300,11 @@ function Invoke-HidingOnekeySelfTest {
     Assert-HidingTruth -Condition (-not (Test-PmInstallOutput 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]')) -Message 'onekey 裁决：Failure 被误判为成功'
     Assert-HidingTruth -Condition (-not (Test-PmInstallOutput '')) -Message 'onekey 裁决：空输出被误判为成功'
     Assert-HidingTruth -Condition (-not (Test-PmInstallOutput 'Successfully done')) -Message 'onekey 裁决：含 Success 子串的非成功输出被误判为成功'
+    # Test-PmInstallDone 是 rooted / 非 rooted 两条路径共用的唯一入口，必须同时看退出码与 Success 行。
+    Assert-HidingTruth -Condition ((Test-PmInstallDone -ExitCode 0 -Output @('Success')).Ok) -Message 'onekey 裁决：exit 0 + Success 必须判为成功'
+    Assert-HidingTruth -Condition (-not (Test-PmInstallDone -ExitCode 0 -Output @('Failure [INSTALL_FAILED_ALREADY_EXISTS: x]')).Ok) -Message 'onekey 裁决：exit 0 + Failure 必须判为失败（rooted 路径假成功回归）'
+    Assert-HidingTruth -Condition (-not (Test-PmInstallDone -ExitCode 1 -Output @('Success')).Ok) -Message 'onekey 裁决：exit 1 + Success 必须判为失败'
+    Assert-HidingTruth -Condition (-not (Test-PmInstallDone -ExitCode -1 -Output @()).Ok) -Message 'onekey 裁决：su 不可用(-1) 必须判为失败'
 
     # (g) §4.4 完整性层（keybox 之外的另两块）：security patch 伪装 + target.txt 静态装入
     $spProbe = @(Get-SecurityPatchPlan -SecurityPatchContent "system=2025-01-01`nboot=2025-01-01`nvendor=2025-01-01")
@@ -579,14 +595,14 @@ foreach ($x in $extra) {
             $p = Push-HidingAsset -Adb $Adb -Serial $Serial -LocalPath $local -RemotePath $remote
             if (-not $p.Ok) { [void]$fails.Add("$id push 失败：" + $p.Why); continue }
             # 检测器安装不需要 root：有 root 时用 su（与包内 installStrategy 一致），没有 root 直接走 adb shell。
+            # 两条路径的裁决必须走同一个入口 Test-PmInstallDone：否则 rooted 路径退回「退出码即裁决」，
+            # 而真实设备上 pm install 失败时退出码同样是 0 —— 那就是假成功。
             if ($root.Ok) {
-                $i = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("pm install -r -t --user 0 $remote")
+                $raw = Invoke-SuShell -Adb $Adb -Serial $Serial -Command ("pm install -r -t --user 0 $remote")
             } else {
                 $raw = Invoke-AdbShell -Adb $Adb -Serial $Serial -Command ("pm install -r -t --user 0 $remote")
-                $txt = ((@($raw.Output)) -join "`n").Trim()
-                $why = if ([string]::IsNullOrWhiteSpace($txt)) { "exit $($raw.ExitCode)" } else { $txt }
-                $i = [pscustomobject]@{ Ok = ($raw.ExitCode -eq 0 -and (Test-PmInstallOutput $txt)); Why = $why }
             }
+            $i = Test-PmInstallDone -ExitCode $raw.ExitCode -Output $raw.Output
             if (-not $i.Ok) { [void]$fails.Add("$id 安装失败：" + $i.Why) }
         }
         if ($fails.Count -gt 0) { $err = ($fails -join ' | ') }
