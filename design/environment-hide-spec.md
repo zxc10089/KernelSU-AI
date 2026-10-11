@@ -457,7 +457,7 @@ moveTo, lineTo, lineTo, lineTo, close
 ## 附录 B. 已知限制
 
 1. **EvenOdd / 描边的运行时渲染未在真机确认**：图标几何已按附录 A 解析验算，但 `PathFillType.EvenOdd` 与 1.8dp 描边变体在 Compose 运行时下的实际表现未经真机确认。斜条右下角到右下折面的余量只有 1.5041dp，是全图最紧的一处，建议在低密度屏（mdpi 24px）上专门确认不会被误读为"盾被切断"。
-2. **5 项底栏的 360dp 实测未做**：每项 59.2dp 由 §3.4 的公式推得，未在 360dp 宽度设备上实测（当前无连接设备）。
+2. **5 项底栏的窄屏实测（已关闭 · 2026-10-10 补测）**：每项 59.2dp 是 §3.4 的公式推算值；已在设备 `67a86199` 上实测 **360dp 与 320dp × Miuix/Material 共四例全部通过**（腿脚本 `_artifacts/device/verify-narrow-bottom-bar.ps1`，汇总 `_artifacts/device/home-ui/narrow-summary.txt`）。实测每列**等宽**（360dp → 72dp、320dp → 64dp、400dp → 80dp）且标签居中，最紧左右余量 **8dp**（320dp 的「超级用户 / 环境隐藏」，CJK 4 字），无越界、无重叠；`defaultMinSize(minWidth = 56.dp)` 在窄屏下未触发。各语言标签长度仍未逐语言核对（见下条）。
 3. **逐语言标签长度未核**：Miuix 侧已改为 `TextOverflow.Ellipsis`，行为已与 Material 一致（§3.4 结论 2）；但各语言 `strings.xml` 中 `hide_environment_tab` 的实际取值长度仍未逐语言核对长度预算。
 4. **Material 侧描边图标的光学重量未目视确认**：`HideEnvironmentIconOutlined` 已接入 `BottomBarMaterial.kt` 与 `NavigationRailMaterial.kt`（§3.4 结论 4），真机上是否与其余四项的描边图标重量一致需要目视确认。
 5. **Miuix 侧没有 app bar 刷新入口**：只有状态卡内一条（§3.1）。是否补齐取决于 `top.yukonga.miuix.kmp.basic.TopAppBar` 是否提供 end-action 槽——该库在本仓库内未核实，属已知不对称。

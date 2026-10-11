@@ -74,7 +74,7 @@ Miuix 侧警告卡为 `ui/component/miuix/WarningCard.kt`，Material 侧是 `ui/
 
 | 层 | 内容 | 尺寸 / 位置 |
 | --- | --- | --- |
-| 水印 | `Icon(Icons.Rounded.CheckCircleOutline)` | `Modifier.size(110.dp)`，外层 `Box(Modifier.fillMaxSize().offset(27.dp, 31.dp), contentAlignment = BottomEnd)` |
+| 水印 | `Icon(Icons.Rounded.CheckCircleOutline)` | `Modifier.size(HomeDimens.StatusBadge)`（96dp），外层 `Box(Modifier.fillMaxSize().padding(end = HomeDimens.StatusBadgeInsetEnd, bottom = HomeDimens.StatusBadgeInsetBottom), contentAlignment = BottomEnd)`〔P1-1 已修订：原 `size(110.dp)` + `offset(27.dp, 31.dp)` 会落在 `Card` 圆角裁剪区内，改为 96dp + padding；见评审文档 §13.1-§13.3〕 |
 | 运行模式角标 | `Text(workingMode)`，`16.sp` + `FontWeight.Medium` | 容器 `padding(16.dp, 10.dp)`，`Alignment.BottomStart` |
 | 结论与版本 | 主文案 `22.sp` + `FontWeight.SemiBold`；`Spacer(1.dp)`；版本行 `15.sp` + `FontWeight.Medium` | 容器 `padding(16.dp, 14.dp)`，`Alignment.TopStart` |
 
@@ -84,7 +84,7 @@ Miuix 侧警告卡为 `ui/component/miuix/WarningCard.kt`，Material 侧是 `ui/
 | --- | --- | --- |
 | 动态取色（`isDynamicColor`） | `colorScheme.secondaryContainer` | `colorScheme.primary.copy(alpha = 0.8f)` |
 | 非动态 · 暗色 | `Color(0xFF1A3825)` | `Color(0xFF36D167)` |
-| 非动态 · 亮色 | `Color(0xFFDFFAE4)` | `Color(0xFF36D167)` |
+| 非动态 · 亮色 | `Color(0xFFDFFAE4)` | `Color(0xFF1E8E3E)`〔P2-2 已修订：原 `#36D167` 在 `#DFFAE4` 卡面上仅 1.81:1，低于 WCAG 非文本 3:1；现 3.791:1。暗色分支 `#36D167` / `#1A3825` = 6.40:1 未动〕 |
 
 主文案为 `R.string.home_working`，安全模式与越狱模式下追加 `R.string.safe_mode` / `R.string.jailbreak_mode` 后缀；版本行取 `R.string.home_working_version`。未激活分支改用 `Card + BasicComponent`（标题 `R.string.home_not_installed`、副标题 `R.string.home_click_to_install`），不支持分支使用 `R.string.home_unsupported` / `R.string.home_unsupported_reason`。
 
@@ -105,7 +105,7 @@ Miuix 侧警告卡为 `ui/component/miuix/WarningCard.kt`，Material 侧是 `ui/
 ### 3.3 约定
 
 - 状态卡是全页唯一"一眼看状态"的卡片，同一事实不得在信息卡中重复呈现。
-- 水印图标固定 110dp 并向右下偏移，是否被卡片圆角裁切需要真机目视确认（见 §7 待办）。
+- 水印图标 96dp 并以 `padding` 收进卡内（P1-1 已修订并复核：原「110dp + 向右下 `offset`」会落在 `Card` 圆角裁剪区内；真机像素复核圆环 bbox 240×240px、完整闭合，见评审文档 §13.3）。
 - 三个叠加层都以 `fillMaxSize` 撑满卡片，卡片高度由主内容层的 `padding` 与字号决定；调整字号时必须同时复核水印位置。
 
 ---
@@ -177,14 +177,14 @@ Material 侧为 `Triple(label, selectedIcon, unselectedIcon)`；隐藏环境一�
 | --- | --- | --- |
 | Miuix（浮动底栏开启） | `FloatingBottomBar` | 栏高 `64.dp`、内边距 `padding(4.dp)`、选中高亮 pill 高 `56.dp`；容器色 `surfaceContainer`，模糊开启时为 `surfaceContainer.copy(0.4f)` |
 | Miuix（浮动底栏关闭） | `NavigationBar` + `NavigationBarItem` | 每项 `Modifier.weight(1f)` |
-| Miuix 标签 | `Text` | `fontSize = 11.sp`、`lineHeight = 14.sp`、`maxLines = 1`、`softWrap = false`、`overflow = TextOverflow.Visible` |
+| Miuix 标签 | `Text` | `fontSize = 11.sp`、`lineHeight = 14.sp`、`maxLines = 1`、`softWrap = false`、`overflow = TextOverflow.Ellipsis`〔P2-2 已修订：原为 `Visible`；两侧现均省略，400% 缩放下实测显示为「主… 超… 环… 模… 设…」〕 |
 | Material | `ShortNavigationBar` + `ShortNavigationBarItem` | 容器色 `colorScheme.surfaceContainer`；标签 `maxLines = 1`、`overflow = TextOverflow.Ellipsis` |
 
 浮动底栏每项的 `Modifier.defaultMinSize(minWidth = 56.dp)` 是下限保护值。
 
 ### 6.3 约定
 
-- **标签长度预算**：CJK ≤ 4 字，拉丁 ≤ 7 字符（默认英文标签 `Hiding`）。Miuix 侧不做省略，超长标签会越界或压到相邻项。
+- **标签长度预算**：CJK ≤ 4 字，拉丁 ≤ 7 字符（默认英文标签 `Hiding`）。〔P2-1/P2-2 已修订并实测：两侧均省略（`Ellipsis`），360dp 与 320dp 下每列等宽（72dp / 64dp）且标签居中，最紧左右余量 8dp（320dp 的「超级用户 / 环境隐藏」），无越界、无重叠。另注：本节原「中心间距 56dp」的表述与代码不符（`defaultMinSize(minWidth = 56.dp)` 是下限保护值，实测未触发），见评审文档 §14.3/§14.4〕
 - **宽度下限**：360dp 屏、5 个 tab 时每项可用宽约 59.2dp，`defaultMinSize` 的下限必须小于该值。
 - **索引一致性**：枚举顺序、底栏列表顺序、pager 页顺序三者必须一致；角标按 `BottomBarDestination.*.ordinal` 定位，三者同步即不会错位。
 - **大屏分栏**：`shouldShowSplitPane()` 为真且未启用 Miuix 浮动底栏时改用 NavigationRail，新增目的地须同步 `NavigationRailMaterial.kt` / `NavigationRailMiuix.kt`。
@@ -199,16 +199,16 @@ Material 侧为 `Triple(label, selectedIcon, unselectedIcon)`；隐藏环境一�
 | --- | --- | --- |
 | 页面水平 / 卡间距 | `HomeDimens` | `HomeDimens`（同源） |
 | 卡片内边距 | 信息卡 `HomeDimens.CardInner`；行动卡走 `BasicComponent` 默认值 | 行动卡与警告卡字面量 `16.dp / 12.dp`；信息卡字面量 `16 / 16 / 14 / 12.dp` |
-| 卡片标题字号 | `MiuixTheme.textStyles.headline1.fontSize` | `titleSmall` |
-| 卡片正文 | `MiuixTheme.textStyles.body2.fontSize` | `bodyMedium`；仓库仅在 `ui/theme/Type.kt` 覆写 `bodyLarge`（`16.sp` / `lineHeight = 24.sp` / `letterSpacing = 0.5.sp`） |
-| 信息卡行底距 | `HomeDimens.InfoRowBottom`，末行 `0.dp` | `Spacer(16.dp)` |
-| 状态卡内部间距 | 由三层 `padding` 决定 | `Arrangement.spacedBy(13.dp)` |
+| 卡片标题字号 | `TypeTokens.cardTitle`（17.sp + Medium，即原 Miuix `headline1` 标度） | `TypeTokens.cardTitle`（同源）〔P1-3 已消解：原 Miuix `headline1` vs Material `titleSmall`，差约 3sp〕 |
+| 卡片正文 | `TypeTokens.cardBody`（14.sp，即原 Miuix `body2` 标度） | `TypeTokens.cardBody`（同源）〔P1-3 已消解：原 Material `bodyMedium` 自带 `lineHeight = 20.sp`，墨迹高比 Miuix 高约 3.67dp；`ui/theme/Type.kt` 仍覆写 `bodyLarge`（`16.sp` / `lineHeight = 24.sp` / `letterSpacing = 0.5.sp`），但首页卡片已不再使用该标度〕 |
+| 信息卡行底距 | `HomeDimens.InfoRowBottom`，末行 `0.dp` | `HomeDimens.InfoRowBottom`，末行 `0.dp`〔P1-3 已消解：删除 5 个 `Spacer(16.dp)`，两侧行 pitch 实测均为 54dp〕 |
+| 状态卡内部间距 | `HomeDimens.StatusModePaddingH/V` + `StatusContentPaddingH/V` + `StatusTitleGap`（原为字面量 `16.dp, 10.dp` / `16.dp, 14.dp` / `1.dp`） | 同源（2026-10-11 统一施工：删空转的 `Arrangement.spacedBy(13.dp)`，活动态卡改镜像 Miuix 三层槽位；见评审文档 §14.8，**待真机验证**） |
 
-### 7.2 待办（待验证）
+### 7.2 待办（2026-10-10 更新）
 
-1. Material 侧的卡片内边距与状态卡间距仍是字面量，未引用 `HomeDimens`；两模式的行距与标题标度差异是否需要统一，属设计决策，尚未裁决。
-2. 状态卡 110dp 水印叠加 `offset(27.dp, 31.dp)` 后是否被 `Card` 圆角裁切，代码可推但未经目视确认——**待验证**。
-3. 底栏在窄于 360dp 的屏幕、以及翻译标签超过长度预算时的表现未经实机确认——**待验证**。
+1. 〔已施工 · 待真机验证〕Material 信息卡的行底距与水平内边距已改引用 `HomeDimens`（P1-3）；状态卡的 `Arrangement.spacedBy(13.dp)` 字面量已删（该 `Column` 只有一个子节点 ⇒ 空转），两模式活动态状态卡已统一到 Miuix 槽位几何（文本轴一律 `HomeDimens.ContentAxis` = 28dp，字阶 `TypeTokens.statusTitle / statusMeta / statusMode`）；配色与安全模式 / 免重启模式的标签呈现仍按各模式原生。**措辞更正**：Material 侧此前被描述为「内容居中」，实测是 M3 `ListItem` 前置 24dp 图标槽导致的**左对齐列 X1 = 64dp**（不是居中）。裁决理由与改动清单见评审文档 §14.5 / §14.8；**编译与真机 dump 尚未执行**（执行环境子进程层故障，见 §14.8 验证状态）。
+2. 〔已关闭〕状态卡水印被圆角裁切：P1-1 已改为 96dp + `padding(end = 16.dp, bottom = 12.dp)`，真机像素复核圆环 bbox 240×240px 完整闭合（评审文档 §13.3）。
+3. 〔已关闭〕底栏窄屏与超长标签：P2-1/P2-2 已实测 **360dp 与 320dp × Miuix/Material 四例全 PASS**（五列等宽 72dp/64dp、标签居中、最紧左右余量 8dp、无越界无重叠），400% 缩放时标签省略为「主…」；见评审文档 §14.3。
 
 ---
 
