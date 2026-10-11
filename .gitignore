@@ -16,3 +16,7 @@ target.txt
 local.properties
 *.jks
 *.keystore
+
+# 本地构建/验证产物（不入库）
+/_artifacts/
+/_tmp/
