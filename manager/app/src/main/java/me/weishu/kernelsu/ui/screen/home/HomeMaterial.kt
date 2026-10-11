@@ -6,16 +6,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -59,6 +63,7 @@ import me.weishu.kernelsu.ui.component.material.TonalCard
 import me.weishu.kernelsu.ui.component.material.expressiveTopAppBarColors
 import me.weishu.kernelsu.ui.component.rebootlistpopup.RebootListPopup
 import me.weishu.kernelsu.ui.component.statustag.StatusTag
+import me.weishu.kernelsu.ui.theme.TypeTokens
 
 @Composable
 fun HomePagerMaterial(
@@ -135,7 +140,9 @@ fun HomePagerMaterial(
                 state = state,
                 actions = actions,
             )
+            SectionHeader(stringResource(R.string.home_section_device_kernel))
             InfoCard(systemInfo = state.systemInfo)
+            SectionHeader(stringResource(R.string.home_section_support_learn))
             AiAssistantCard(onClick = actions.onOpenAiConfig)
             DonateCard(onOpenUrl = actions.onOpenUrl)
             LearnMoreCard(onOpenUrl = actions.onOpenUrl)
@@ -182,7 +189,17 @@ private fun TopBar(
     scrollBehavior: TopAppBarScrollBehavior? = null
 ) {
     LargeFlexibleTopAppBar(
-        title = { Text(stringResource(R.string.app_name)) },
+        title = {
+            Text(
+                text = stringResource(R.string.app_name),
+                // P2-3: the page has one text axis (HomeDimens.ContentAxis). The M3 app bar
+                // already insets the title slot by 16dp, so only the remainder is added here,
+                // and the size is pinned to the shared token so the two modes report the same
+                // title ink height (measured 37.33dp in both modes).
+                style = TypeTokens.pageTitle,
+                modifier = Modifier.padding(start = HomeDimens.TopBarTitleExtraInset)
+            )
+        },
         actions = { RebootListPopup() },
         colors = expressiveTopAppBarColors(),
         windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
@@ -195,7 +212,7 @@ private fun StatusCard(
     state: HomeUiState,
     actions: HomeActions,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+    Column {
         val ksuActive = state.ksuVersion != null
         val notInstalled = !ksuActive && state.kernelVersion.isGKI()
 
@@ -229,15 +246,9 @@ private fun StatusCard(
             }
         } else ""
 
-        val statusTrailing: (@Composable () -> Unit)? = if (ksuActive && workingMode.isNotEmpty()) {
-            {
-                StatusTag(
-                    label = workingMode,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    backgroundColor = MaterialTheme.colorScheme.primary
-                )
-            }
-        } else if (notInstalled && state.isSELinuxPermissive) {
+        // Only the inactive branches still use an M3 `ListItem`; the working-mode tag that used to
+        // sit in its trailing slot is now the bottom-start label of the mirrored active card.
+        val statusTrailing: (@Composable () -> Unit)? = if (notInstalled && state.isSELinuxPermissive) {
             {
                 Button(
                     onClick = actions.onJailbreakClick,
@@ -262,7 +273,18 @@ private fun StatusCard(
                 }
             }
         ) {
-            ListItem(
+            if (ksuActive) {
+                // Status-card unification (§7.2-1 / §14.5): mirror the Miuix slot layout instead of
+                // the M3 `ListItem`, whose leading icon slot pushed the text column to X1 = 64dp.
+                StatusCardActiveBody(
+                    statusTitle = statusTitle,
+                    statusSummary = statusSummary,
+                    workingMode = workingMode,
+                    contentColor = contentColor,
+                    isSafeMode = state.isSafeMode,
+                    isLateLoadMode = state.isLateLoadMode,
+                )
+            } else ListItem(
                 modifier = Modifier,
                 leadingContent = {
                     Icon(statusIcon, contentDescription = statusTitle)
@@ -312,6 +334,108 @@ private fun StatusCard(
     }
 }
 
+/**
+ * Content of the *active* status card (status-card unification, design/home-ui-review.md §7.2-1 /
+ * §14.5).
+ *
+ * Mirrors the slot layout of the Miuix card (`HomeMiuix.kt`): the text block is anchored top-start,
+ * the working-mode label bottom-start and the success watermark bottom-end, all inset by the shared
+ * [HomeDimens] paddings so the text block reports the same left edge as every other card
+ * ([HomeDimens.ContentAxis] = 28dp) and the same ink scale ([TypeTokens.statusTitle] / statusMeta /
+ * statusMode). The M3 `ListItem` this replaced reserved a 24dp leading slot for the status icon,
+ * which pushed the text column to X1 = 64dp and changed the type scale — the same card then
+ * measured differently in the two UI modes.
+ *
+ * The card states its height explicitly ([HomeDimens.StatusCardHeight] = 108dp, i.e. the watermark
+ * plus its bottom inset): the three slots are `fillMaxSize()` children of one `Box`, and a `Box`
+ * without a definite height hands them the unbounded scrolling constraints, which collapses the
+ * bottom-start slot. Miuix gets the same definite height from `Row(height(IntrinsicSize.Min))`.
+ */
+@Composable
+private fun StatusCardActiveBody(
+    statusTitle: String,
+    statusSummary: String,
+    workingMode: String,
+    contentColor: Color,
+    isSafeMode: Boolean,
+    isLateLoadMode: Boolean,
+) {
+    Box(modifier = Modifier.fillMaxWidth().height(HomeDimens.StatusCardHeight)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    end = HomeDimens.StatusBadgeInsetEnd,
+                    bottom = HomeDimens.StatusBadgeInsetBottom
+                ),
+            contentAlignment = Alignment.BottomEnd
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.CheckCircleOutline,
+                contentDescription = null,
+                modifier = Modifier.size(HomeDimens.StatusBadge),
+                tint = contentColor.copy(alpha = 0.8f)
+            )
+        }
+        if (workingMode.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = HomeDimens.StatusModePaddingH,
+                        vertical = HomeDimens.StatusModePaddingV
+                    ),
+                contentAlignment = Alignment.BottomStart,
+            ) {
+                Text(
+                    text = workingMode,
+                    style = TypeTokens.statusMode,
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    horizontal = HomeDimens.StatusContentPaddingH,
+                    vertical = HomeDimens.StatusContentPaddingV
+                ),
+            contentAlignment = Alignment.TopStart,
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = statusTitle,
+                        style = TypeTokens.statusTitle,
+                    )
+                    if (isSafeMode) {
+                        Spacer(Modifier.width(8.dp))
+                        StatusTag(
+                            label = stringResource(id = R.string.safe_mode),
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            backgroundColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    }
+                    if (isLateLoadMode) {
+                        Spacer(Modifier.width(8.dp))
+                        StatusTag(
+                            label = stringResource(id = R.string.jailbreak_mode),
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            backgroundColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    }
+                }
+                Spacer(Modifier.height(HomeDimens.StatusTitleGap))
+                Text(
+                    text = statusSummary,
+                    style = TypeTokens.statusMeta,
+                    color = contentColor.copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun WarningCard(
     message: String,
@@ -353,11 +477,11 @@ private fun LearnMoreCard(onOpenUrl: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text(text = stringResource(R.string.home_learn_kernelsu), style = MaterialTheme.typography.titleSmall)
+                Text(text = stringResource(R.string.home_learn_kernelsu), style = TypeTokens.cardTitle)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = stringResource(R.string.home_click_to_learn_kernelsu),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = TypeTokens.cardBody,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -375,11 +499,11 @@ private fun AiAssistantCard(onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = stringResource(R.string.home_ai_assistant_title), style = MaterialTheme.typography.titleSmall)
+                Text(text = stringResource(R.string.home_ai_assistant_title), style = TypeTokens.cardTitle)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = stringResource(R.string.home_ai_assistant_summary),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = TypeTokens.cardBody,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -402,16 +526,36 @@ private fun DonateCard(onOpenUrl: (String) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text(text = stringResource(R.string.home_support_title), style = MaterialTheme.typography.titleSmall)
+                Text(text = stringResource(R.string.home_support_title), style = TypeTokens.cardTitle)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = stringResource(R.string.home_support_content),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = TypeTokens.cardBody,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
     }
+}
+
+/**
+ * Card-group / section header (P1-2).
+ *
+ * It sits on the card-content axis ([HomeDimens.CardInner] inside the page padding) so a header
+ * lines up with the text of the cards it introduces, and it carries [HomeDimens.SectionTop] of
+ * extra room above so that it visually belongs to the group below it rather than to the block
+ * above it.
+ */
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = TypeTokens.sectionTitle,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = HomeDimens.CardInner, top = HomeDimens.SectionTop)
+    )
 }
 
 @Composable
@@ -420,26 +564,27 @@ private fun InfoCard(systemInfo: SystemInfo) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp)
+                .padding(start = HomeDimens.CardInner, end = HomeDimens.CardInner, top = 14.dp, bottom = 12.dp)
         ) {
             @Composable
-            fun InfoCardItem(label: String, content: String) {
-                Text(text = label, style = MaterialTheme.typography.bodyLarge)
+            fun InfoCardItem(
+                label: String,
+                content: String,
+                bottomPadding: Dp = HomeDimens.InfoRowBottom,
+            ) {
+                Text(text = label, style = TypeTokens.cardTitle)
                 Text(
                     text = content,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = TypeTokens.cardBody,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, bottom = bottomPadding)
                 )
             }
 
             InfoCardItem(stringResource(R.string.home_manager_version), systemInfo.managerVersion)
-            Spacer(Modifier.height(16.dp))
             InfoCardItem(stringResource(R.string.home_kernel), systemInfo.kernelVersion)
-            Spacer(Modifier.height(16.dp))
             InfoCardItem(stringResource(R.string.home_device_model), systemInfo.deviceModel)
-            Spacer(Modifier.height(16.dp))
             InfoCardItem(stringResource(R.string.home_fingerprint), systemInfo.fingerprint)
-            Spacer(Modifier.height(16.dp))
             val selinuxDisplay = when (systemInfo.selinuxStatus) {
                 "Enforcing" -> stringResource(R.string.selinux_status_enforcing)
                 "Permissive" -> stringResource(R.string.selinux_status_permissive)
@@ -447,7 +592,6 @@ private fun InfoCard(systemInfo: SystemInfo) {
                 else -> stringResource(R.string.selinux_status_unknown)
             }
             InfoCardItem(stringResource(R.string.home_selinux_status), selinuxDisplay)
-            Spacer(Modifier.height(16.dp))
             val seccompDisplay = when (systemInfo.seccompStatus) {
                 -1 -> stringResource(R.string.seccomp_status_not_supported)
                 0 -> stringResource(R.string.seccomp_status_disabled)
@@ -455,7 +599,7 @@ private fun InfoCard(systemInfo: SystemInfo) {
                 2 -> stringResource(R.string.seccomp_status_filter)
                 else -> stringResource(R.string.seccomp_status_unknown)
             }
-            InfoCardItem(stringResource(R.string.home_seccomp_status), seccompDisplay)
+            InfoCardItem(stringResource(R.string.home_seccomp_status), seccompDisplay, bottomPadding = 0.dp)
         }
     }
 }

@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,6 +50,7 @@ import me.weishu.kernelsu.ui.component.dialog.rememberConfirmDialog
 import me.weishu.kernelsu.ui.component.miuix.WarningCard
 import me.weishu.kernelsu.ui.component.rebootlistpopup.RebootListPopupMiuix
 import me.weishu.kernelsu.ui.theme.LocalEnableBlur
+import me.weishu.kernelsu.ui.theme.TypeTokens
 import me.weishu.kernelsu.ui.theme.isInDarkTheme
 import me.weishu.kernelsu.ui.util.BlurredBar
 import me.weishu.kernelsu.ui.util.module.LatestVersionInfo
@@ -70,7 +70,6 @@ import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Link
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.isDynamicColor
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -171,7 +170,9 @@ fun HomePagerMiuix(
                             state = state,
                             actions = actions,
                         )
+                        SectionHeader(stringResource(R.string.home_section_device_kernel))
                         InfoCard(systemInfo = state.systemInfo)
+                        SectionHeader(stringResource(R.string.home_section_support_learn))
                         AiAssistantCard(onClick = actions.onOpenAiConfig)
                         DonateCard(onOpenUrl = actions.onOpenUrl)
                         LearnMoreCard(onOpenUrl = actions.onOpenUrl)
@@ -230,9 +231,34 @@ private fun TopBar(
             actions = {
                 RebootListPopupMiuix()
             },
+            // P2-3: the large title left its 26dp default so that the whole page has the one
+            // 28dp text axis (HomeDimens.ContentAxis). The collapsed title is centred by the
+            // library itself and is left alone.
+            titlePadding = HomeDimens.ContentAxis,
             scrollBehavior = scrollBehavior
         )
     }
+}
+
+/**
+ * Card-group / section header (P1-2).
+ *
+ * It sits on the card-content axis ([HomeDimens.CardInner] inside the page padding) so a header
+ * lines up with the text of the cards it introduces, and it carries [HomeDimens.SectionTop] of
+ * extra room above so that it visually belongs to the group below it rather than to the block
+ * above it.
+ */
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        fontSize = TypeTokens.sectionTitle.fontSize,
+        fontWeight = TypeTokens.sectionTitle.fontWeight,
+        color = colorScheme.onSurface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = HomeDimens.CardInner, top = HomeDimens.SectionTop)
+    )
 }
 
 @Composable
@@ -283,18 +309,30 @@ private fun StatusCard(
                     ) {
                         Box {
                             Box(
+                                // P1-1: the success watermark used to be pushed 27dp/31dp past the
+                                // card's content box (offset(27.dp, 31.dp)), so its ring was cut by the
+                                // card's rounded corner. Keep the same bottom-end anchor but inset it
+                                // instead of pushing it outwards: an offset can only move the ring
+                                // further outside the clip, a padding cannot.
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .offset(27.dp, 31.dp),
+                                    .padding(end = HomeDimens.StatusBadgeInsetEnd, bottom = HomeDimens.StatusBadgeInsetBottom),
                                 contentAlignment = Alignment.BottomEnd
                             ) {
                                 Icon(
-                                    modifier = Modifier.size(110.dp),
+                                    modifier = Modifier.size(HomeDimens.StatusBadge),
                                     imageVector = Icons.Rounded.CheckCircleOutline,
-                                    tint = if (isDynamicColor) {
-                                        colorScheme.primary.copy(alpha = 0.8f)
-                                    } else {
-                                        Color(0xFF36D167)
+                                    // P2-2 (design/home-ui-review.md §7): the hard-coded branch used a
+                                    // single green for both themes. Measured WCAG contrast of that green
+                                    // (#36D167) against the light card (#DFFAE4) is only 1.81:1 — below the
+                                    // 3:1 floor for non-text graphics — while against the dark card
+                                    // (#1A3825) it is a healthy 6.40:1. Keep the bright green on dark and
+                                    // use a darker green (3.85:1) on light. Text contrast is unaffected
+                                    // (15.41:1 light / 10.00:1 dark, both from the card's contentColor).
+                                    tint = when {
+                                        isDynamicColor -> colorScheme.primary.copy(alpha = 0.8f)
+                                        isInDarkTheme() -> Color(0xFF36D167)
+                                        else -> Color(0xFF1E8E3E)
                                     },
                                     contentDescription = null
                                 )
@@ -303,36 +341,39 @@ private fun StatusCard(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(16.dp, 10.dp),
+                                        .padding(
+                                            horizontal = HomeDimens.StatusModePaddingH,
+                                            vertical = HomeDimens.StatusModePaddingV
+                                        ),
                                     contentAlignment = Alignment.BottomStart,
                                 ) {
                                     Text(
                                         text = workingMode,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        style = TypeTokens.statusMode,
                                     )
                                 }
                             }
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(16.dp, 14.dp),
+                                    .padding(
+                                        horizontal = HomeDimens.StatusContentPaddingH,
+                                        vertical = HomeDimens.StatusContentPaddingV
+                                    ),
                                 contentAlignment = Alignment.TopStart,
                             ) {
                                 Column {
                                     Text(
                                         text = workingText,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.SemiBold,
+                                        style = TypeTokens.statusTitle,
                                     )
-                                    Spacer(Modifier.height(1.dp))
+                                    Spacer(Modifier.height(HomeDimens.StatusTitleGap))
                                     Text(
                                         text = stringResource(
                                             R.string.home_working_version,
                                             "${state.ksuVersion}-${state.kernelUAPIVersion}"
                                         ),
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        style = TypeTokens.statusMeta,
                                     )
                                 }
                             }
@@ -473,13 +514,13 @@ private fun InfoCard(systemInfo: SystemInfo) {
     ) {
         Text(
             text = title,
-            fontSize = MiuixTheme.textStyles.headline1.fontSize,
-            fontWeight = FontWeight.Medium,
+            fontSize = TypeTokens.cardTitle.fontSize,
+            fontWeight = TypeTokens.cardTitle.fontWeight,
             color = colorScheme.onSurface
         )
         Text(
             text = content,
-            fontSize = MiuixTheme.textStyles.body2.fontSize,
+            fontSize = TypeTokens.cardBody.fontSize,
             color = colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.padding(top = 2.dp, bottom = bottomPadding)
         )
