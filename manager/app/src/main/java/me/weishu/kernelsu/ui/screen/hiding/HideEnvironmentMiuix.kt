@@ -687,7 +687,8 @@ private fun HidingPackEndActionMiuix(
 }
 
 /**
- * Refresh row of the status card (P1-1). It is a [HeaderComponentMiuix] instead of an
+ * Refresh row of the status card (spec §6 P0-3; the row component is §6.2 A-2). It is a
+ * [HeaderComponentMiuix] instead of an
  * `ArrowPreference` like the page's other action rows because every one of its card neighbours is a
  * header row, and the two components do not share a left inset: mixing them left this row 18px to
  * the left of the row above it. The trailing glyph is the library's own `Basic.ArrowRight`, i.e. the
@@ -711,7 +712,7 @@ private fun RefreshPreference(onRefresh: () -> Unit) {
 }
 
 /**
- * Expand/collapse row of the status card (P1-1). It is the same row component as the rows it
+ * Expand/collapse row of the status card (spec §6.2 A-1). It is the same row component as the rows it
  * discloses, so the card keeps one left inset, and its chevron is the only extra glyph it carries:
  * an `ArrowPreference` adds a second chevron next to any `endActions`, which is the double-arrow
  * glitch this replaces. The chevron itself is the rounded `KeyboardArrowUp/Down` pair the rest of
