@@ -538,7 +538,26 @@ cargo fmt
 2. 软重启偏好生效时（late-load 模式或设置开启）执行的是 `ksud soft-reboot`，只重启用户态：内核 uptime 不归零、界面只是短暂闪一下，容易被误判为没反应。
 3. late-load 模式下先弹确认框，不点「确定」就不会重启。
 
-**发现的一处真实缺陷**：确认框的 `onConfirm = { reboot() }` 没有携带 `reason`，因此在 late-load 模式下即使偏好软重启，经确认框执行的动作也总是硬重启。修法是把确认框的构造放进返回的 lambda 内以捕获 `reason`，例如 `{ reason -> if (Natives.isLateLoadMode && reason.isEmpty()) showConfirm(onConfirm = { reboot(reason) }) else reboot(reason) }`。本次只定位不改码。
+**关于确认框的一处勘误（2026-10-10）**：本节早先记为「真实缺陷」的判断不成立，撤回。`rememberRebootAction()`（`manager/app/src/main/java/me/weishu/kernelsu/ui/component/rebootlistpopup/RebootListPopup.kt:44-58`，v3.3.0 baseline）中确认框**只在 `Natives.isLateLoadMode && reason.isEmpty()` 时可达**；带非空 reason（含 `soft_reboot`）的调用走 `reboot(reason)`，永不进入确认框。因此进入确认框时 `reason` 必为空，`onConfirm = { reboot() }`（`:47`）与 else 分支的 `reboot("")` 行为一致，不存在「偏好软重启却总是硬重启」的路径；确认框本身只是 late-load 模式下硬重启前的安全提示（`:42` 注释：confirms first in jailbreak mode where a plain reboot drops root）。原版组件按「只修我们自己的 bug，原版不要动」的口径**保持 baseline 不变**；工作区里曾经存在的 +12 行改动（把 `onConfirm` 改成携带 `pendingReason`）已回退，备份见 `_artifacts/builder/evidence/RebootListPopup.kt.pendingReason-hardening.bak`。
+
+## 10. 本轮修复：AI 上下文信封、思考过程卡片、清空对话（2026-10-11）
+
+三项都是用户报告的问题，全部在真机上闭环验证；完整证据台账（改动清单、dump、日志行号）见仓库根 `docs/DEVELOPMENT.md` §23.15。
+
+1. **AI 上下文反馈漏洞（P0）**。以前工具被拦截或失败时，回传给模型的内容只有一句中文，模型无法可靠区分「被安全策略拦截」「用户取消」「执行失败」「计划暂停」，于是容易编造「没有这个工具」「设备没有这个文件」。现在统一成结构化信封：`AiExecutionOutcome` 增加 `status / error / message`，新增 `AiOutcomeStatus`（ok / failed / blocked / cancelled / skipped）与 `AiErrorCode`（12 个码，见附录 A.2），序列化统一走 `aiResultJson()`，键序 `ok → tool → status → blocked → data → error → message`。控制台的 SKIPPED / 被拦截 / 用户取消 / 执行四条路径都会追加一行信封，并在回传串开头写明「每行 JSON 信封是唯一权威结果……凡是 status 不是 ok 必须如实告知原因与解除办法」；`AiPrompt` 也补了对应的工作方式条目。真机实测：一轮被拦截的动作之后，客户端确实把三条 `status: "blocked"` 信封作为新一轮 user 消息发回模型，system prompt 由 6375 字增至 6919 字。
+2. **思考过程卡片点不动**。卡片（`AiReasoningCardMiuix` / `AiReasoningCardMaterial`）原来用 `remember(reasoning)` 保存展开状态，而流式输出下 `reasoning` 每个分片都在变，状态被反复重建，点击后立刻弹回折叠态。改为按消息 id 记忆（`remember(messageId)`）；折叠只影响是否绘制文本，ViewModel 仍继续往同一个 `StringBuilder` 追加。真机实测：流式中途点击可立刻展开；展开状态下推理文本从 250 字增长到 295 字；全程保持折叠、流结束后再展开能拿到含最后一片尾句的完整文本，说明折叠没有打断底层接收；再次点击可收回。
+3. **清空对话后状态污染**。`clearConversation()` 漏清 `pending` / `batchGate` / `batchSnapshot` / `roundBatchId` / `reconText` 与 UI 的 `planMode` / `batch` / `pendingQueue`，于是新模式标记、待执行队列与设备 recon 缓存会渗进新对话。现已逐项清空。真机实测：计划模式下产生的计划卡与「当前有 3 项待执行操作」队列在清空后全部消失，同一个探针再次发送时不再走计划卡，而是按对话模式直接拦截。
+
+附带的界面改动：主页两模式的状态卡已统一几何与字阶（文本轴 28dp、标题 25.67dp、正文 17.67dp、模式标签 19dp，卡内间距 1dp，Material 侧显式声明 108dp 卡高）。只统一几何与字阶，配色与标签呈现仍保持各模式原生。
+
+
+## 11. 本轮修复：AI 访问范围两档 + 系统提示词事实性修复（2026-10-11）
+
+用户诉求是「AI 可读的内容太少，把读取权限抬高，在规定目录下可读」；最终裁决为**访问范围只留两档**（`允许访问 /data/adb/` 与 `允许访问根目录 /`），新装或从未设置过的设备默认前者，**已存「禁止访问」的设备保持原值不动**，授权目录内不再设额外文件白名单。同一轮修掉提示词里 8 条与实现不符的描述。完整改动清单、真机证据与披露见仓库根 `docs/DEVELOPMENT.md` §23.16。
+
+1. **访问范围收敛为两档**。`AiAccessScope.options` 由三档改为 `listOf(DATA_ADB, ROOT_FS)`，两个 Sheet（miuix / material）都遍历它，所以选择器里不再出现「禁止访问」；`NONE` 常量保留为 fail-closed 值（未知存储键、UI 初值、撤销旧审计项仍可能是它）。新增 `STARTUP_DEFAULT = DATA_ADB`：`AiSettingsRepositoryImpl.accessScope` 在「从未存过」时返回它，存储值存在时仍按 `fromKey` 解析（未知值回落 NONE），并且不再读旧键 `allow_module_dir`；旧的布尔迁移函数 `fromLegacyAllowModuleDir` 已删除。`DEFAULT = NONE` 语义不变，仍用于「解析失败」与两个 UiState 的初值（fail-closed）。
+2. **提示词按事实重写**（`data/agent/AiPrompt.kt`）。要点：`run_command` **没有白名单**（按风险分级，只有只读文件命令与设备信息命令自动放行），只有 `safe_exec_shell` 走只读白名单；授权目录内**没有额外文件白名单**，文本文件都可读，二进制与数据库文件被拒绝是**文件类型判断、与授权范围无关**（不要再建议提高范围）；工作方式第 14 条是结果信封的**唯一权威描述**（键序 `ok → tool → status → blocked → data → error → message`，`ok ⟺ status=ok`，`blocked=true` 含 cancelled，`skipped` 表示计划暂停），授权范围段末条只保留「信封唯一权威 + status≠ok 必须如实转述 + 禁止编造/绕行」；不可撤销动作必须单独批准、`delete_file(force=true)` 才是最高确认等级，同轮 3 个以上 MEDIUM 动作统一升档；补上第二种截断标记原文与 `read_file_chunk` 单次 2000 行上限。
+3. **真机证据**。提示词侧用 mock 模型的请求日志抓「真正发给 API 的 system prompt」，三档分别 7469 / 7442 / 7877 字符，旧错误语句在三档中命中数均为 0、新语句按档位命中；两档选择器与默认值取证见根文档 §23.16.3。
 
 ## 附录 A. 关键常量一览
 
@@ -574,6 +593,10 @@ cargo fmt
 | 附件：文件 / 图片 / 文本 / 压缩包条目 | 8 MB / 5 MB / 64000 字符 / 10 × 4000 字符 | `ui/screen/aiassistant/AiAttachments.kt` |
 | 模块草稿上限 | 20 个文件、单文件 64 KB、合计 128 KB、安装脚本 32 KB | `data/modulemaker/ModuleDraft.kt` |
 | 安装器输出截断 | `6000` 字符 | `data/modulemaker/ModuleMaker.kt` |
+| 工具返回信封 | 键序 `ok → tool → status → blocked → data → error → message`；`blocked = status ∈ {blocked, cancelled}` | `data/agent/AiActionExecutor.kt` |
+| 结果状态 | `ok` / `failed` / `blocked` / `cancelled` / `skipped` | 同上（`AiOutcomeStatus`） |
+| 错误码 | `security_denied`、`scope_too_narrow`、`file_access_disabled`、`path_outside_scope`、`shell_disabled`、`invalid_request`、`validation_failed`、`unknown_tool`、`unknown_action`、`execution_failed`、`user_declined`、`plan_paused` | 同上（`AiErrorCode`） |
+| 主页状态卡高度 | `StatusCardHeight = StatusBadge + StatusBadgeInsetBottom = 108` dp | `ui/screen/home/HomeDimens.kt` |
 
 ### A.3 资源字符串约定
 

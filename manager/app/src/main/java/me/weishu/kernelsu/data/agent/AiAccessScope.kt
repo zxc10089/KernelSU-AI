@@ -8,7 +8,12 @@ import me.weishu.kernelsu.R
  *
  * The ordering of the constants is the permission ordering: a switch to a higher ordinal widens
  * access and therefore has to pass the strict confirmation gate, a switch to a lower one applies
- * immediately. NONE is the fail-closed default.
+ * immediately.
+ *
+ * [options] is the user-facing selector: only [DATA_ADB] and [ROOT_FS] can be picked. [NONE] stays
+ * in the enum as the fail-closed value (unknown stored key, UI default before the repository
+ * answers, undo of an old audit entry); a device that already stored NONE keeps it until the user
+ * picks one of the two options.
  *
  * Note that granting and revoking root for an app does not go through the file system
  * (Natives.setAppProfile), so it stays available in every scope.
@@ -17,7 +22,11 @@ enum class AiAccessScope(
     @get:StringRes val labelRes: Int,
     @get:StringRes val summaryRes: Int,
 ) {
-    /** No file access at all. Chat and app permission review still work. */
+    /**
+     * No file access at all. Chat and app permission review still work.
+     *
+     * Not offered by [options] any more: kept as the fail-closed value only.
+     */
     NONE(R.string.ai_access_scope_none, R.string.ai_access_scope_none_summary),
 
     /** Read and write under /data/adb (module directories, ksud state, the AI trash). */
@@ -40,19 +49,18 @@ enum class AiAccessScope(
     fun isElevationFrom(current: AiAccessScope): Boolean = ordinal > current.ordinal
 
     companion object {
-        /** Fail-closed: a fresh install cannot read anything until the user says so. */
+        /**
+         * Fail-closed value used when a stored key cannot be understood and as the UI default
+         * before the repository answers. It is no longer offered by [options].
+         */
         val DEFAULT: AiAccessScope = NONE
 
-        /** Display order of the selector. */
-        val options: List<AiAccessScope> = listOf(NONE, DATA_ADB, ROOT_FS)
+        /** Scope a device starts with when the user has never chosen one. */
+        val STARTUP_DEFAULT: AiAccessScope = DATA_ADB
+
+        /** Display order of the selector: /data/adb first, then the whole root. */
+        val options: List<AiAccessScope> = listOf(DATA_ADB, ROOT_FS)
 
         fun fromKey(key: String?): AiAccessScope = entries.firstOrNull { it.name == key } ?: DEFAULT
-
-        /**
-         * One-time migration from the phase-1 boolean allow_module_dir: the module directory lives
-         * under /data/adb, so true maps onto the /data/adb scope.
-         */
-        fun fromLegacyAllowModuleDir(allow: Boolean): AiAccessScope =
-            if (allow) DATA_ADB else DEFAULT
     }
 }

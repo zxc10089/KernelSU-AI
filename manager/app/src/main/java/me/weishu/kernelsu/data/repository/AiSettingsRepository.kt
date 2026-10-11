@@ -25,13 +25,14 @@ interface AiSettingsRepository {
     /** Whether the assistant is allowed to run shell commands at all. Off by default. */
     var allowShell: Boolean
 
-    /** Whether the assistant may read and modify module directories. Off by default. */
+    /** Whether the assistant may read and modify module directories. Legacy phase-1 key, unused. */
     var allowModuleDir: Boolean
 
     /**
-     * Which part of the file system the assistant may touch. Fail-closed default
-     * ([me.weishu.kernelsu.data.agent.AiAccessScope.DEFAULT]); [allowModuleDir] is only kept as
-     * the legacy key this value is migrated from.
+     * Which part of the file system the assistant may touch. A device that never stored a value
+     * starts at [me.weishu.kernelsu.data.agent.AiAccessScope.STARTUP_DEFAULT]; an unreadable stored
+     * value falls back to the fail-closed [me.weishu.kernelsu.data.agent.AiAccessScope.DEFAULT].
+     * [allowModuleDir] is the legacy phase-1 key and is no longer read.
      */
     var accessScope: AiAccessScope
 

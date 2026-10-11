@@ -29,8 +29,11 @@ private val SheetRowPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp
 /**
  * "Choose access scope" bottom sheet, Miuix flavour.
  *
- * The three options are the whole scope model: forbid everything, /data/adb only, or the whole
- * file system. Picking a wider scope does not apply here - the caller turns it into the typed
+ * [AiAccessScope.options] is the whole user-facing scope model: /data/adb only, or the whole file
+ * system. [AiAccessScope.NONE] is not offered any more; it survives only as the fail-closed value
+ * for a device that stored an unknown scope or never picked one, and such a device sees two rows
+ * with nothing ticked until it picks one.
+ * Picking a wider scope does not apply here - the caller turns it into the typed
  * confirmation dialog first.
  */
 @Composable

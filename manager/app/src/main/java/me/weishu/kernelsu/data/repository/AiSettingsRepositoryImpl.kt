@@ -64,11 +64,10 @@ class AiSettingsRepositoryImpl : AiSettingsRepository {
         get() {
             val stored = prefs.getString(KEY_ACCESS_SCOPE, null)
             if (stored != null) return AiAccessScope.fromKey(stored)
-            // One-time migration from the phase-1 switch: the module directory lives under
-            // /data/adb. The legacy key itself is left alone so an older build still reads it.
-            return AiAccessScope.fromLegacyAllowModuleDir(
-                prefs.getBoolean(KEY_ALLOW_MODULE_DIR, false)
-            )
+            // Never configured: start at /data/adb (the user-facing floor since 2026-10-11). An
+            // older build's allow_module_dir boolean is deliberately ignored - devices that never
+            // stored access_scope get the startup default, devices that stored one keep it.
+            return AiAccessScope.STARTUP_DEFAULT
         }
         set(value) = prefs.edit { putString(KEY_ACCESS_SCOPE, value.name) }
 
