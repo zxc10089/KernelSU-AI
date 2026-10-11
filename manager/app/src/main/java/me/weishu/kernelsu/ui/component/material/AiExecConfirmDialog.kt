@@ -42,7 +42,7 @@ fun AiExecConfirmDialogMaterial(
         onDismissRequest = onDismissRequest,
         title = {
             Text(
-                text = "\u26a0\ufe0f " + stringResource(pending.titleRes),
+                text = stringResource(pending.titleRes),
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.error,
             )

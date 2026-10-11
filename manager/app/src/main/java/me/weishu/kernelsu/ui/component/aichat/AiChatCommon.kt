@@ -1,7 +1,12 @@
 package me.weishu.kernelsu.ui.component.aichat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.stringResource
@@ -11,12 +16,14 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.dp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import me.weishu.kernelsu.R
 import me.weishu.kernelsu.data.agent.AiAction
 import me.weishu.kernelsu.data.agent.AiSafetyTier
+import me.weishu.kernelsu.data.agent.tool.AiRiskLevel
 import me.weishu.kernelsu.ui.screen.aiassistant.AiActionStatus
 
 /*
@@ -29,7 +36,13 @@ val TerminalBackground = Color(0xFF10161A)
 val TerminalForeground = Color(0xFF7CE38B)
 val TerminalAccent = Color(0xFF7FB3FF)
 
-/** Human readable name of the operation; the target is rendered separately. */
+/**
+ * Human readable name of the operation; the target is rendered separately.
+ *
+ * A tool call is titled with its business name, because the protocol id the model talks in means
+ * nothing to the reader; a tool with no wording of its own keeps its protocol name rather than
+ * disappearing behind a generic "tool call".
+ */
 @Composable
 fun aiActionTitle(action: AiAction): String = when (action) {
     is AiAction.ReadFile -> stringResource(R.string.ai_console_action_read_file)
@@ -47,6 +60,7 @@ fun aiActionTitle(action: AiAction): String = when (action) {
     is AiAction.InstallModule -> stringResource(R.string.ai_console_action_install_module)
     is AiAction.MoveToTrash -> stringResource(R.string.ai_console_action_move_to_trash)
     is AiAction.MakeModule -> stringResource(R.string.ai_console_action_make_module)
+    is AiAction.Tool -> AiToolLabels[action.toolName]?.let { stringResource(it) } ?: action.toolName
     is AiAction.Unknown -> stringResource(R.string.ai_console_action_unknown)
 }
 
@@ -68,7 +82,27 @@ fun aiActionTarget(action: AiAction): String = when (action) {
     is AiAction.InstallModule -> action.path
     is AiAction.MoveToTrash -> action.path
     is AiAction.MakeModule -> action.draft.id + " · " + action.draft.name
+    is AiAction.Tool -> aiToolTarget(action)
     is AiAction.Unknown -> action.raw.take(400)
+}
+
+/** Tool name plus its arguments on one line; the arguments are stable-sorted so the card never jitters. */
+internal fun aiToolTarget(action: AiAction.Tool): String = buildString {
+    append(action.toolName)
+    val args = action.args.entries.filter { it.value != null }.sortedBy { it.key }
+    if (args.isNotEmpty()) {
+        append(' ')
+        append(args.joinToString(", ") { it.key + "=" + it.value })
+    }
+}.take(400)
+
+/** Risk tag on a batch row; the level itself is never localised, only this caption is. */
+@Composable
+fun aiRiskLabel(risk: AiRiskLevel): String = when (risk) {
+    AiRiskLevel.LOW -> stringResource(R.string.ai_console_risk_low)
+    AiRiskLevel.MEDIUM -> stringResource(R.string.ai_console_risk_medium)
+    AiRiskLevel.HIGH -> stringResource(R.string.ai_console_risk_high)
+    AiRiskLevel.FATAL -> stringResource(R.string.ai_console_risk_fatal)
 }
 
 /** One line summary of a captured result; the body stays hidden behind it until asked for. */
@@ -133,6 +167,59 @@ fun aiStatusLabel(status: AiActionStatus): String = when (status) {
     AiActionStatus.CANCELLED -> stringResource(R.string.ai_console_status_cancelled)
     AiActionStatus.SKIPPED -> stringResource(R.string.ai_console_status_skipped)
 }
+
+/*
+ * Result stripe colours are fixed values rather than palette roles, for the same reason the terminal
+ * block has its own colours: a verdict has to read identically in both UI modes and in light and
+ * dark themes, and a themed "error" that turns pink on one palette would stop meaning failure.
+ */
+val ResultOkColor = Color(0xFF2E9E5B)
+val ResultFailColor = Color(0xFFD2453F)
+val ResultWarnColor = Color(0xFFD08A16)
+
+/**
+ * Colour of the stripe down a result card's left edge: green once the action ran, red when it failed
+ * or was refused by the path guard, amber when nothing happened (cancelled or skipped). Null while
+ * the card is still waiting for a decision, so a proposal carries no verdict colour.
+ */
+fun aiResultStripeColor(status: AiActionStatus): Color? = when (status) {
+    AiActionStatus.DONE -> ResultOkColor
+    AiActionStatus.FAILED, AiActionStatus.DENIED -> ResultFailColor
+    AiActionStatus.CANCELLED, AiActionStatus.SKIPPED -> ResultWarnColor
+    else -> null
+}
+
+/** Draws that stripe; a pending card draws nothing and keeps the plain surface. */
+@Composable
+fun AiResultStripe(status: AiActionStatus) {
+    val color = aiResultStripeColor(status) ?: return
+    Box(
+        modifier = Modifier
+            .width(4.dp)
+            .fillMaxHeight()
+            .background(color),
+    )
+}
+
+/**
+ * Plain text behind "copy result": what the operation was, what it acted on, how it ended and the
+ * captured output. Pure and Compose-free so the clipboard payload can be reasoned about on its own;
+ * the caller passes the already localised title, target and status.
+ */
+fun aiResultCopyText(
+    title: String,
+    target: String,
+    status: String,
+    note: String?,
+    output: String?,
+): String = buildString {
+    append(title)
+    if (target.isNotBlank()) append('\n').append(target)
+    append('\n').append(status)
+    note?.takeIf { it.isNotBlank() }?.let { append('\n').append(it) }
+    output?.takeIf { it.isNotBlank() }?.let { append('\n').append("----").append('\n').append(it.trim()) }
+}
+
 /**
  * Lightweight markdown reader for model output: the assistant answers with markdown in practice,
  * and rendering the markers literally reads as broken text. Bold runs, bullet markers, heading

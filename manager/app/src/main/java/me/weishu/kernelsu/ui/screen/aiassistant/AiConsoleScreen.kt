@@ -15,7 +15,9 @@ import me.weishu.kernelsu.R
 import me.weishu.kernelsu.ui.LocalUiMode
 import me.weishu.kernelsu.ui.UiMode
 import me.weishu.kernelsu.ui.component.dialog.rememberConfirmDialog
+import me.weishu.kernelsu.ui.component.material.AiBatchApprovalDialogMaterial
 import me.weishu.kernelsu.ui.component.material.AiExecConfirmDialogMaterial
+import me.weishu.kernelsu.ui.component.miuix.AiBatchApprovalDialogMiuix
 import me.weishu.kernelsu.ui.component.miuix.AiExecConfirmDialogMiuix
 import me.weishu.kernelsu.ui.navigation3.LocalNavigator
 import me.weishu.kernelsu.ui.navigation3.Route
@@ -56,6 +58,13 @@ fun AiConsoleScreen(kickoff: String? = null) {
         onAttachmentsAdded = viewModel::addAttachments,
         onRemoveAttachment = viewModel::removeAttachment,
         onAttachmentError = viewModel::attachmentFailed,
+        onBatchToggle = viewModel::toggleBatch,
+        onBatchSelectAll = viewModel::selectAllBatch,
+        onBatchConfirm = viewModel::confirmBatch,
+        onBatchCancel = viewModel::cancelBatch,
+        onBatchHide = viewModel::hideBatch,
+        onOpenQueue = viewModel::openQueue,
+        onRetryAction = viewModel::retryAction,
     )
 
     // rememberConfirmDialog keeps its callbacks for the lifetime of the composition, so the pending
@@ -128,6 +137,14 @@ fun AiConsoleScreen(kickoff: String? = null) {
     when (LocalUiMode.current) {
         UiMode.Miuix -> {
             AiConsolePagerMiuix(uiState = uiState, actions = actions)
+            AiBatchApprovalDialogMiuix(
+                approval = uiState.batch,
+                onToggle = actions.onBatchToggle,
+                onSelectAll = actions.onBatchSelectAll,
+                onConfirm = actions.onBatchConfirm,
+                onDismissRequest = actions.onBatchHide,
+                onCancel = actions.onBatchCancel,
+            )
             AiExecConfirmDialogMiuix(
                 request = uiState.confirm as? AiConfirmRequest.Strict,
                 onConfirm = { pending?.let { viewModel.confirm(it.actionId) } },
@@ -137,6 +154,14 @@ fun AiConsoleScreen(kickoff: String? = null) {
 
         UiMode.Material -> {
             AiConsolePagerMaterial(uiState = uiState, actions = actions)
+            AiBatchApprovalDialogMaterial(
+                approval = uiState.batch,
+                onToggle = actions.onBatchToggle,
+                onSelectAll = actions.onBatchSelectAll,
+                onConfirm = actions.onBatchConfirm,
+                onDismissRequest = actions.onBatchHide,
+                onCancel = actions.onBatchCancel,
+            )
             AiExecConfirmDialogMaterial(
                 request = uiState.confirm as? AiConfirmRequest.Strict,
                 onConfirm = { pending?.let { viewModel.confirm(it.actionId) } },

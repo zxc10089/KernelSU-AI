@@ -56,7 +56,7 @@ fun AiExecConfirmDialogMiuix(
         insideMargin = DpSize(0.dp, 0.dp),
     ) {
         Text(
-            text = "\u26a0\ufe0f " + stringResource(pending.titleRes),
+            text = stringResource(pending.titleRes),
             fontSize = MiuixTheme.textStyles.title4.fontSize,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,

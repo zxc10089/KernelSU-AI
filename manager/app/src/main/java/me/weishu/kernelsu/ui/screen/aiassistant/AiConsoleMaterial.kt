@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
@@ -33,6 +34,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -58,6 +60,7 @@ import me.weishu.kernelsu.ui.icon.AiUploadFileIcon
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.launch
 
 /** The AI console, Material flavour. Mirrors AiConsolePagerMiuix. */
 @Composable
@@ -207,6 +210,7 @@ fun AiConsolePagerMaterial(
                             onRevisePlan = actions.onRevisePlan,
                             onAbortPlan = actions.onAbortPlan,
                             onOpenModuleMaker = actions.onOpenModuleMaker,
+                            onRetryAction = actions.onRetryAction,
                         )
                     }
                 }
@@ -245,6 +249,21 @@ fun AiConsolePagerMaterial(
                     onPicked = actions.onAttachmentsAdded,
                     onError = actions.onAttachmentError,
                 )
+                // The queue strip sits directly above the composer so a round that is waiting for
+                // approval stays visible after its dialog is dismissed; tapping it brings the round
+                // back (and pins the view to the newest action card).
+                if (uiState.pendingQueue > 0) {
+                    val scope = rememberCoroutineScope()
+                    AiQueueBarMaterial(
+                        count = uiState.pendingQueue,
+                        onClick = {
+                            actions.onOpenQueue()
+                            scope.launch {
+                                listState.animateScrollToItem(uiState.messages.lastIndex.coerceAtLeast(0))
+                            }
+                        },
+                    )
+                }
                 // One rounded container holds the whole composer - attachment pills, the text and
                 // the action row - instead of a text field flanked by buttons on a bare row.
                 Column(
@@ -286,10 +305,11 @@ fun AiConsolePagerMaterial(
                                             ) { actions.onRemoveAttachment(attachment.id) },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Text(
-                                            text = "✕",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(16.dp),
                                         )
                                     }
                                 }
@@ -425,5 +445,37 @@ private fun AiSendButtonMaterial(
                 modifier = Modifier.size(20.dp),
             )
         }
+    }
+}
+
+/**
+ * Pending queue strip: how many actions are still waiting for approval, above the input box.
+ *
+ * It never executes anything by itself - it only reports the backlog and hands the round back to the
+ * user when tapped (see AiConsoleViewModel.openQueue).
+ */
+@Composable
+private fun AiQueueBarMaterial(count: Int, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.ai_console_queue_bar, count),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = stringResource(R.string.ai_console_queue_bar_action),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
     }
 }

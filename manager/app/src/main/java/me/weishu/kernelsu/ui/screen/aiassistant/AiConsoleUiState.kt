@@ -5,6 +5,7 @@ import me.weishu.kernelsu.data.agent.AiAction
 import me.weishu.kernelsu.data.agent.AiAccessScope
 import me.weishu.kernelsu.data.agent.AiAgentLog
 import me.weishu.kernelsu.data.agent.AiSafetyTier
+import me.weishu.kernelsu.data.agent.tool.AiRiskLevel
 import me.weishu.kernelsu.data.remote.AiImage
 
 enum class AiRole { USER, ASSISTANT }
@@ -86,6 +87,45 @@ sealed interface AiConfirmRequest {
     ) : AiConfirmRequest
 }
 
+/**
+ * One row of the batch approval dialog: a single pending action with its risk level.
+ *
+ * The label, subtitle and payload are resolved on the view-model side because the dialog itself has
+ * no access to the string table of a specific action, and the risk level travels as an enum so the
+ * dialog can both render the tag and decide whether select-all is allowed.
+ *
+ * [label] is what will happen in business words ("Delete permanently"), [subtitle] names the object
+ * it happens to ("Target: /data/adb/modules/foo") and [payload] is the raw argument dump that stays
+ * collapsed behind the per-row details toggle.
+ */
+@Immutable
+data class AiBatchItem(
+    val actionId: Long,
+    val label: String,
+    val subtitle: String,
+    val payload: String,
+    val risk: AiRiskLevel,
+)
+
+/**
+ * A whole round of pending actions approved in one dialog instead of one dialog per action.
+ *
+ * [containsFatal] is the one flag every safeguard hangs off: when a fatal action (real delete,
+ * forced overwrite) is anywhere in this round, select-all is disabled and nothing is pre-selected,
+ * so every irreversible row has to be ticked by hand. Confirmations are no longer gated on a typed
+ * keyword (the wording was dropped by product decision; the risk tag says "irreversible" instead).
+ */
+@Immutable
+data class AiBatchApproval(
+    val batchId: String,
+    val items: List<AiBatchItem>,
+    val selected: Set<Long>,
+    val containsFatal: Boolean,
+) {
+    val selectedCount: Int get() = selected.size
+    val allSelected: Boolean get() = items.isNotEmpty() && selected.size == items.size
+}
+
 @Immutable
 data class AiConsoleUiState(
     val configured: Boolean = false,
@@ -104,6 +144,10 @@ data class AiConsoleUiState(
     /** Plan mode batches a whole round of actions behind one approval instead of running them one by one. */
     val planMode: Boolean = false,
     val plan: AiPlanItem? = null,
+    /** A whole round of gates shown as one list dialog; set only while the user is deciding. */
+    val batch: AiBatchApproval? = null,
+    /** How many actions the assistant has queued but not executed yet, for the hint above the input. */
+    val pendingQueue: Int = 0,
 )
 
 @Immutable
@@ -128,4 +172,21 @@ data class AiConsoleActions(
     val onAttachmentsAdded: (List<AiAttachment>) -> Unit,
     val onRemoveAttachment: (Long) -> Unit,
     val onAttachmentError: (String) -> Unit,
+    /** Ticks or unticks one row of the batch dialog. */
+    val onBatchToggle: (Long) -> Unit,
+    /** Selects or clears every row; the dialog disables it when the round contains a fatal action. */
+    val onBatchSelectAll: (Boolean) -> Unit,
+    /** Approves the ticked rows; an irreversible row must have been ticked by hand first. */
+    val onBatchConfirm: () -> Unit,
+    /** Throws the whole round away: the cancel button, never a tap outside the dialog. */
+    val onBatchCancel: () -> Unit,
+    /** Only hides the dialog; the round stays queued and the hint above the input brings it back. */
+    val onBatchHide: () -> Unit,
+    /** Brings the pending queue back on screen from the hint above the input box. */
+    val onOpenQueue: () -> Unit,
+    /**
+     * Runs one finished-for-bad-reasons row again through the same approval gate. Only offered on
+     * outcomes that left the device untouched, so a retry can never repeat a completed write.
+     */
+    val onRetryAction: (Long) -> Unit,
 )

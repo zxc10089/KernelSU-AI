@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -61,6 +62,7 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.icon.extended.Close2
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -73,6 +75,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import me.weishu.kernelsu.ui.icon.AiUploadFileIcon
+import kotlinx.coroutines.launch
 
 /**
  * The AI console, Miuix flavour (design brief section 4).
@@ -262,6 +265,7 @@ fun AiConsolePagerMiuix(
                                 onRevisePlan = actions.onRevisePlan,
                                 onAbortPlan = actions.onAbortPlan,
                                 onOpenModuleMaker = actions.onOpenModuleMaker,
+                                onRetryAction = actions.onRetryAction,
                             )
                         }
                     }
@@ -299,6 +303,21 @@ fun AiConsolePagerMiuix(
                         onPicked = actions.onAttachmentsAdded,
                         onError = actions.onAttachmentError,
                     )
+                    // The queue strip sits directly above the composer so a round that is waiting for
+                    // approval stays visible after its dialog is dismissed; tapping it brings the round
+                    // back (and pins the view to the newest action card).
+                    if (uiState.pendingQueue > 0) {
+                        val scope = rememberCoroutineScope()
+                        AiQueueBarMiuix(
+                            count = uiState.pendingQueue,
+                            onClick = {
+                                actions.onOpenQueue()
+                                scope.launch {
+                                    listState.animateScrollToItem(uiState.messages.lastIndex.coerceAtLeast(0))
+                                }
+                            },
+                        )
+                    }
                     // One rounded container holds the whole composer - attachment pills, the text and
                     // the action row - instead of a text field flanked by buttons on a bare row.
                     Column(
@@ -340,10 +359,11 @@ fun AiConsolePagerMiuix(
                                                 ) { actions.onRemoveAttachment(attachment.id) },
                                             contentAlignment = Alignment.Center,
                                         ) {
-                                            Text(
-                                                text = "✕",
-                                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                                                color = colorScheme.onSecondaryContainer,
+                                            Icon(
+                                                imageVector = MiuixIcons.Close2,
+                                                contentDescription = null,
+                                                tint = colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.size(16.dp),
                                             )
                                         }
                                     }
@@ -491,5 +511,37 @@ private fun AiSendButtonMiuix(
                 modifier = Modifier.size(20.dp),
             )
         }
+    }
+}
+
+/**
+ * Pending queue strip: how many actions are still waiting for approval, above the input box.
+ *
+ * It never executes anything by itself - it only reports the backlog and hands the round back to the
+ * user when tapped (see AiConsoleViewModel.openQueue).
+ */
+@Composable
+private fun AiQueueBarMiuix(count: Int, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colorScheme.tertiaryContainer)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.ai_console_queue_bar, count),
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+            color = colorScheme.onTertiaryContainer,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = stringResource(R.string.ai_console_queue_bar_action),
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+            color = colorScheme.onTertiaryContainer,
+        )
     }
 }

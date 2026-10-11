@@ -135,6 +135,22 @@ sealed interface AiAction {
     }
 
     /**
+     * One structured tool call from the registry in design/ai-tool-api.md.
+     *
+     * The model names a tool and fills in declared parameters; it never writes the command. The
+     * handler builds the command from already validated arguments, so no model authored text ever
+     * reaches the shell unquoted.
+     */
+    @Immutable
+    data class Tool(
+        val toolName: String,
+        val args: Map<String, Any?> = emptyMap(),
+        override val reason: String? = null,
+    ) : AiAction {
+        override val name: String get() = toolName
+    }
+
+    /**
      * Anything the client does not understand. Kept (and shown) instead of dropped so the user sees
      * the request, and gated at STRICT so an unknown verb can never run quietly.
      */

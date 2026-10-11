@@ -1,5 +1,12 @@
 package me.weishu.kernelsu.data.agent
 
+import me.weishu.kernelsu.data.agent.tool.AiRiskLevel
+import me.weishu.kernelsu.data.agent.tool.AiToolCategory
+import me.weishu.kernelsu.data.agent.tool.AiToolRegistry
+import me.weishu.kernelsu.data.agent.tool.AiToolSpec
+import me.weishu.kernelsu.data.agent.tool.AiToolValidation
+import me.weishu.kernelsu.data.agent.tool.AiToolValidator
+
 /**
  * Fail closed gate for everything the assistant proposes to do with the file system or with root.
  *
@@ -286,6 +293,62 @@ object AiPathGuard {
         return false
     }
 
+    /**
+     * The gate for a structured tool call. The spec decides the tier; [AiToolValidator] has already
+     * checked every parameter and its path scope, so all that is left here is the shell switch and
+     * the batch escalation, which from now on only lifts MEDIUM and above (see deviation D-af).
+     */
+    fun decideTool(
+        action: AiAction.Tool,
+        scope: AiAccessScope,
+        batchSize: Int = 1,
+        allowShell: Boolean = true,
+    ): AiGuardDecision {
+        val spec = AiToolRegistry.byName(action.toolName)
+            ?: return AiGuardDecision.Deny("unknown tool: " + action.toolName)
+        if (spec.needsShell && !allowShell) return AiGuardDecision.Deny("shell execution is disabled")
+        if (scope.ordinal < requiredScopeOf(spec).ordinal) {
+            return AiGuardDecision.Deny("该工具需要更高的访问范围：" + requiredScopeOf(spec).name)
+        }
+        val validation = AiToolValidator.validate(spec, action.args, scope, allowShell)
+        if (validation is AiToolValidation.Invalid) return AiGuardDecision.Deny(validation.reason)
+        val risk = spec.riskOf(action.args)
+        val tier = if (risk.ordinal >= AiRiskLevel.MEDIUM.ordinal) escalate(risk.tier, batchSize) else risk.tier
+        return AiGuardDecision.Allow(tier)
+    }
+
+    /**
+     * The effective risk of one call, its arguments included. The batch approval dialog reads this to
+     * decide whether a row carries the FATAL tag and therefore the typed confirmation barrier.
+     */
+    fun riskOf(action: AiAction.Tool): AiRiskLevel =
+        AiToolRegistry.byName(action.toolName)?.riskOf(action.args) ?: AiRiskLevel.HIGH
+
+    /**
+     * The scope a structured tool needs before it may run (deviation D-ai).
+     *
+     * Path arguments are already validated against the granted scope, but a handler builds its own
+     * commands, so without this a tool that reads /proc, iptables or the certificate store would run
+     * for a user who has switched file access off. The floor is derived from the category rather than
+     * declared per tool so the eight families cannot drift out of one another:
+     *
+     * - SYSTEM / NETWORK / SECURITY read system files through commands, so they need ROOT_FS;
+     * - FILE / MODULE / AUTOMATION reach outside /data/adb only through validated path arguments,
+     *   so the /data/adb floor is enough and the stricter path check still applies;
+     * - APP only reads package metadata (the same class of access as the pre-existing root app list)
+     *   and the text-only tools touch nothing, so both stay outside the scope system.
+     */
+    fun requiredScopeOf(spec: AiToolSpec): AiAccessScope = when {
+        !spec.needsShell -> AiAccessScope.NONE
+        spec.category == AiToolCategory.SYSTEM -> AiAccessScope.ROOT_FS
+        spec.category == AiToolCategory.NETWORK -> AiAccessScope.ROOT_FS
+        spec.category == AiToolCategory.SECURITY -> AiAccessScope.ROOT_FS
+        spec.category == AiToolCategory.FILE -> AiAccessScope.DATA_ADB
+        spec.category == AiToolCategory.MODULE -> AiAccessScope.DATA_ADB
+        spec.category == AiToolCategory.AUTOMATION -> AiAccessScope.DATA_ADB
+        else -> AiAccessScope.NONE
+    }
+
     /** The single gate every proposed action goes through. */
     fun decide(
         action: AiAction,
@@ -308,6 +371,7 @@ object AiPathGuard {
         // The model authors this payload itself, including a customize.sh that ksud runs as root:
         // no scope or batch exemption, every single one gets the red dialog.
         is AiAction.MakeModule -> AiGuardDecision.Allow(AiSafetyTier.STRICT)
+        is AiAction.Tool -> decideTool(action, scope, batchSize, allowShell)
         is AiAction.Unknown -> AiGuardDecision.Allow(AiSafetyTier.STRICT)
     }
 
