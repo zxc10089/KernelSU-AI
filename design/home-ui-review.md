@@ -202,11 +202,11 @@ Material 侧为 `Triple(label, selectedIcon, unselectedIcon)`；隐藏环境一�
 | 卡片标题字号 | `TypeTokens.cardTitle`（17.sp + Medium，即原 Miuix `headline1` 标度） | `TypeTokens.cardTitle`（同源）〔P1-3 已消解：原 Miuix `headline1` vs Material `titleSmall`，差约 3sp〕 |
 | 卡片正文 | `TypeTokens.cardBody`（14.sp，即原 Miuix `body2` 标度） | `TypeTokens.cardBody`（同源）〔P1-3 已消解：原 Material `bodyMedium` 自带 `lineHeight = 20.sp`，墨迹高比 Miuix 高约 3.67dp；`ui/theme/Type.kt` 仍覆写 `bodyLarge`（`16.sp` / `lineHeight = 24.sp` / `letterSpacing = 0.5.sp`），但首页卡片已不再使用该标度〕 |
 | 信息卡行底距 | `HomeDimens.InfoRowBottom`，末行 `0.dp` | `HomeDimens.InfoRowBottom`，末行 `0.dp`〔P1-3 已消解：删除 5 个 `Spacer(16.dp)`，两侧行 pitch 实测均为 54dp〕 |
-| 状态卡内部间距 | `HomeDimens.StatusModePaddingH/V` + `StatusContentPaddingH/V` + `StatusTitleGap`（原为字面量 `16.dp, 10.dp` / `16.dp, 14.dp` / `1.dp`） | 同源（2026-10-11 统一施工：删空转的 `Arrangement.spacedBy(13.dp)`，活动态卡改镜像 Miuix 三层槽位；见评审文档 §14.8，**待真机验证**） |
+| 状态卡内部间距 | `HomeDimens.StatusModePaddingH/V` + `StatusContentPaddingH/V` + `StatusTitleGap`（原为字面量 `16.dp, 10.dp` / `16.dp, 14.dp` / `1.dp`） | 同源（2026-10-11 统一施工：删空转的 `Arrangement.spacedBy(13.dp)`，活动态卡改镜像 Miuix 三层槽位；见评审文档 §14.8，**双模式真机验证通过（2026-10-11）**） |
 
 ### 7.2 待办（2026-10-10 更新）
 
-1. 〔已施工 · 待真机验证〕Material 信息卡的行底距与水平内边距已改引用 `HomeDimens`（P1-3）；状态卡的 `Arrangement.spacedBy(13.dp)` 字面量已删（该 `Column` 只有一个子节点 ⇒ 空转），两模式活动态状态卡已统一到 Miuix 槽位几何（文本轴一律 `HomeDimens.ContentAxis` = 28dp，字阶 `TypeTokens.statusTitle / statusMeta / statusMode`）；配色与安全模式 / 免重启模式的标签呈现仍按各模式原生。**措辞更正**：Material 侧此前被描述为「内容居中」，实测是 M3 `ListItem` 前置 24dp 图标槽导致的**左对齐列 X1 = 64dp**（不是居中）。裁决理由与改动清单见评审文档 §14.5 / §14.8；**编译与真机 dump 尚未执行**（执行环境子进程层故障，见 §14.8 验证状态）。
+1. 〔已施工 · 已验证〕Material 信息卡的行底距与水平内边距已改引用 `HomeDimens`（P1-3）；状态卡的 `Arrangement.spacedBy(13.dp)` 字面量已删（该 `Column` 只有一个子节点 ⇒ 空转），两模式活动态状态卡已统一到 Miuix 槽位几何（文本轴一律 `HomeDimens.ContentAxis` = 28dp，字阶 `TypeTokens.statusTitle / statusMeta / statusMode`）；配色与安全模式 / 免重启模式的标签呈现仍按各模式原生。**措辞更正**：Material 侧此前被描述为「内容居中」，实测是 M3 `ListItem` 前置 24dp 图标槽导致的**左对齐列 X1 = 64dp**（不是居中）。裁决理由与改动清单见评审文档 §14.5 / §14.8；**编译已执行并复核**（r3 签名构建 + `_tools/verify-identity.ps1` + `apk-inspect.ps1`，见 §9），真机 dump 见评审文档 §14.8（双模式真机验证通过）。
 2. 〔已关闭〕状态卡水印被圆角裁切：P1-1 已改为 96dp + `padding(end = 16.dp, bottom = 12.dp)`，真机像素复核圆环 bbox 240×240px 完整闭合（评审文档 §13.3）。
 3. 〔已关闭〕底栏窄屏与超长标签：P2-1/P2-2 已实测 **360dp 与 320dp × Miuix/Material 四例全 PASS**（五列等宽 72dp/64dp、标签居中、最紧左右余量 8dp、无越界无重叠），400% 缩放时标签省略为「主…」；见评审文档 §14.3。
 
@@ -226,7 +226,7 @@ rg -n "padding\(horizontal = 1[26]\.dp\)|spacedBy\(1[23]\.dp\)" \
   manager/app/src/main/java/me/weishu/kernelsu/ui/screen/home/HomeMaterial.kt
 ```
 
-预期：第一条列出两个文件的引用；第二条在页面级布局上无命中（`HomeMaterial.kt` 中 `StatusCard` 的 `spacedBy(13.dp)` 属于状态卡内部，见 §7.1）。
+预期：第一条列出两个文件的引用；第二条在页面级布局上无命中（`HomeMaterial.kt` 中 `StatusCard` 的 `spacedBy(13.dp)` 属于状态卡内部，已于 2026-10-11 删除，见 §7.1）。
 
 ### 8.2 构建
 
@@ -237,9 +237,50 @@ cd manager
 
 按仓库 `AGENTS.md`，构建前必须先把 ksud 二进制放到 `manager/app/src/main/jniLibs/arm64-v8a/libksud.so`，否则 Gradle 构建失败。
 
+注意：本工作区的 `./gradlew` 不可用（wrapper 首次下载 Gradle 发行版时 JDK 21 的 PKIX 链校验失败），实际可用的构建入口见 §9.1。
+
 ### 8.3 实机核对
 
 - 主页所有卡片的左边界应与 `HomeDimens.PageHorizontal` 一致；
 - 三张行动卡与信息卡的文本左边界应完全相同；
 - 信息卡相邻两行标题顶点的间距 = 标题行高 + `2.dp` + 正文行高 + `HomeDimens.InfoRowBottom`；
 - 切换 UI 模式后重复上述三项，两模式应给出相同结果。
+
+---
+
+## 9. 构建与验证状态（2026-10-11 · r3）
+
+本章记录 §7.2-1 状态卡统一施工之后的**实际构建与验收证据**，取代此前「编译尚未执行」的描述。
+
+### 9.1 构建入口（签名 release）
+
+本工作区不能用 `./gradlew`（wrapper 首次下载 Gradle 发行版时 JDK 21 的 PKIX 链校验失败）。实际入口是仓库内**签名感知**的脚本：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File KernelSU-v330\_tools\build-manager.ps1 -Task ':app:assembleRelease' -NoDaemon
+```
+
+它固定 toolchain（`JAVA_HOME=.toolchain\jdk-21`、`ANDROID_HOME=.toolchain\android-sdk`、`GRADLE_USER_HOME=.toolchain\gradle-home`、`TEMP=.toolchain\tmp`），强制 `-Dorg.gradle.vfs.watch=false` 与 `--no-watch-fs`（执行环境不允许 Gradle 的文件系统监视），并读取 `_artifacts\builder\keystore\keystore.properties` 把 `-PKEYSTORE_FILE / -PKEYSTORE_PASSWORD / -PKEY_ALIAS / -PKEY_PASSWORD` 交给 `manager/app/build.gradle.kts` 的 `apksign { }`。
+
+**缺这一步会静默回退 Android debug 密钥**（Gradle 仅打印 `Apksign fallbacks to use debug singature as null does not exist`），产物无法被内嵌 LKM 的证书白名单认领；事故记录见 `_artifacts/builder/size-report.md` §5。构建日志会打印 `SIGNING=<properties 路径> (alias kernelsu-ai)`，这是判断有没有真正签名的唯一可靠信号——**不能用 APK 字节数判断**（项目密钥与 debug 密钥都是 RSA-2048，v2 签名块长度一致，两者字节数可以完全相同）。
+
+### 9.2 产物与验收证据
+
+| 项 | 值 |
+| --- | --- |
+| 构建命令 / 退出码 | `:app:assembleRelease` → `BUILD SUCCESSFUL in 22s` / `EXITCODE=0`（日志 `_artifacts/builder/r3-release-build.log`） |
+| 源码树 | `GIT_STATUS` 空、`GIT_DIFF_SHA256=e3b0c442…b785`（空 diff）⇒ 产物由**已提交**的源码构建 |
+| APK | `manager\app\build\outputs\apk\release\KernelSU_v3.3.0+main_32601-release.apk` |
+| 字节 / SHA-256 | `122507636` / `4f6b297729898dc2fc953c6217871a106e2fe9545b5635755e24711d88958c79` |
+| 签名 | v2、单签名者，`CN=KernelSU-AI, OU=KernelSU-AI, O=zxc10089, C=CN`，证书 SHA-256 `ca40afa8…65a83eec`（内核白名单的项目私钥，**非** AOSP debug key） |
+| applicationId / 版本 | `me.weishu.kernelsu.hide` / `32601`（`v3.3.0+main`，minSdk 31、targetSdk 37） |
+| 内嵌隐藏资产 | `assets/hiding/` 24 项、detectors 9；`manifest.json` sha256 `40458b51…10aac9` |
+| 内嵌 daemon | `lib/arm64-v8a/libksud.so` sha256 `c3a825b8…5e0648`、`lib/x86_64/` `d56e2c0e…6584c5`；两 ABI 均内嵌 fork 包名、无裸上游名、KMI 矩阵双向一致（各 8 个） |
+| 驱动版本 | `userspace/ksud/bin/<abi>/*.ko` 共 16 个，逐个读出 `version=32601`，provenance = path A（源码构建） |
+| 身份闸门 | `_tools\verify-identity.ps1 -WorkTree KernelSU-v330 -Apk <APK>` → `IDENTITY VERIFY: PASSED (0 warning(s))`，exit 0 |
+| 批量取证 | `_artifacts\builder\apk-inspect.ps1 -Apk <APK> -Tag r3` → `_artifacts\builder\r3.inspect.txt`（`APKSIGNER_EXIT=0`） |
+
+### 9.3 真机
+
+状态卡统一施工的双模式真机验证（设备 `67a86199`、1dp = 3px、`font_scale 1.0`）与窄屏（360dp / 320dp）、400% 缩放、`font_scale 2.0` 回归结论见评审文档 §14.8；本仓库只保留结论与 §7 引用的数值。
