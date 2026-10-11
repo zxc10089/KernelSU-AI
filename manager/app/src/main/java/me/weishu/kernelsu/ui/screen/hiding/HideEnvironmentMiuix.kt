@@ -30,6 +30,9 @@ import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.LayersClear
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -62,6 +65,8 @@ import me.weishu.kernelsu.ui.component.statustag.StatusTag
 import me.weishu.kernelsu.ui.theme.LocalEnableBlur
 import me.weishu.kernelsu.ui.util.BlurredBar
 import me.weishu.kernelsu.ui.util.rememberBlurBackdrop
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -197,6 +202,8 @@ private fun EnvironmentStatusCardMiuix(
         .filter { it.isNotBlank() }
         .joinToString(" | ")
 
+    val detailsExpanded = remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier
             .padding(top = 12.dp)
@@ -219,27 +226,13 @@ private fun EnvironmentStatusCardMiuix(
         )
         HeaderComponentMiuix(
             icon = Icons.Rounded.Info,
-            title = stringResource(id = R.string.hide_environment_kernel_uapi),
-            summary = uiState.kernelUapiVersion.toString()
-        )
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.Info,
-            title = stringResource(id = R.string.hide_environment_manager_uapi),
-            summary = uiState.managerUapiVersion.toString()
-        )
-        HeaderComponentMiuix(
-            icon = Icons.Rounded.Info,
             title = stringResource(id = R.string.hide_environment_selinux_status),
             summary = uiState.selinuxStatus
         )
-        // Boolean capabilities are only rendered when they hold; the repo has no yes/no string key.
-        if (uiState.isFullFeatured) {
-            HeaderComponentMiuix(
-                icon = Icons.Rounded.CheckCircle,
-                title = stringResource(id = R.string.hide_environment_full_featured),
-                summary = null
-            )
-        }
+        // Degraded states stay visible without expanding: only the purely informational UAPI rows
+        // and the all-good capability row fold into the disclosure row below, so a device that needs
+        // attention is never hidden behind a tap. Boolean capabilities are only rendered when they
+        // hold; the repo has no yes/no string key.
         if (uiState.isSafeMode) {
             HeaderComponentMiuix(
                 icon = Icons.Rounded.Warning,
@@ -253,6 +246,29 @@ private fun EnvironmentStatusCardMiuix(
                 title = stringResource(id = R.string.hide_environment_late_load),
                 summary = null
             )
+        }
+        StatusDetailsPreference(
+            expanded = detailsExpanded.value,
+            onToggle = { detailsExpanded.value = !detailsExpanded.value }
+        )
+        if (detailsExpanded.value) {
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Info,
+                title = stringResource(id = R.string.hide_environment_kernel_uapi),
+                summary = uiState.kernelUapiVersion.toString()
+            )
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Info,
+                title = stringResource(id = R.string.hide_environment_manager_uapi),
+                summary = uiState.managerUapiVersion.toString()
+            )
+            if (uiState.isFullFeatured) {
+                HeaderComponentMiuix(
+                    icon = Icons.Rounded.CheckCircle,
+                    title = stringResource(id = R.string.hide_environment_full_featured),
+                    summary = null
+                )
+            }
         }
         // The only refresh entry point inside the page: it used to hide at the bottom of the pack
         // card, i.e. below the fold on a 360dp screen.
@@ -297,7 +313,7 @@ private fun HidingSwitchesCardMiuix(uiState: HideEnvironmentUiState, actions: Hi
                 status = uiState.kernelUmountStatus,
                 fallback = stringResource(id = R.string.settings_kernel_umount_summary)
             ),
-            startAction = { PreferenceIcon(Icons.Rounded.LayersClear) },
+            startAction = { PreferenceIcon(Icons.Rounded.Layers) },
             enabled = uiState.kernelUmountStatus == "supported",
             checked = uiState.isKernelUmountEnabled,
             onCheckedChange = actions.onSetKernelUmountEnabled
@@ -670,13 +686,56 @@ private fun HidingPackEndActionMiuix(
     }
 }
 
+/**
+ * Refresh row of the status card (P1-1). It is a [HeaderComponentMiuix] instead of an
+ * `ArrowPreference` like the page's other action rows because every one of its card neighbours is a
+ * header row, and the two components do not share a left inset: mixing them left this row 18px to
+ * the left of the row above it. The trailing glyph is the library's own `Basic.ArrowRight`, i.e. the
+ * chevron `ArrowPreference` drew here before.
+ */
 @Composable
 private fun RefreshPreference(onRefresh: () -> Unit) {
-    ArrowPreference(
+    HeaderComponentMiuix(
+        icon = Icons.Rounded.Refresh,
         title = stringResource(id = R.string.hide_environment_refresh),
         summary = null,
-        startAction = { PreferenceIcon(Icons.Rounded.Refresh) },
+        endActions = {
+            Icon(
+                imageVector = MiuixIcons.Basic.ArrowRight,
+                contentDescription = null,
+                tint = colorScheme.onBackground
+            )
+        },
         onClick = onRefresh
+    )
+}
+
+/**
+ * Expand/collapse row of the status card (P1-1). It is the same row component as the rows it
+ * discloses, so the card keeps one left inset, and its chevron is the only extra glyph it carries:
+ * an `ArrowPreference` adds a second chevron next to any `endActions`, which is the double-arrow
+ * glitch this replaces. The chevron itself is the rounded `KeyboardArrowUp/Down` pair the rest of
+ * this file's rows already draw; Miuix' own `ExpandMore`/`ExpandLess` are the four-corner "expand"
+ * glyphs, not chevrons.
+ */
+@Composable
+private fun StatusDetailsPreference(expanded: Boolean, onToggle: () -> Unit) {
+    HeaderComponentMiuix(
+        icon = Icons.Rounded.Info,
+        title = stringResource(id = R.string.hide_environment_status_details),
+        summary = null,
+        endActions = {
+            Icon(
+                imageVector = if (expanded) {
+                    Icons.Rounded.KeyboardArrowUp
+                } else {
+                    Icons.Rounded.KeyboardArrowDown
+                },
+                contentDescription = null,
+                tint = colorScheme.onBackground
+            )
+        },
+        onClick = onToggle
     )
 }
 
@@ -691,7 +750,8 @@ private fun RefreshPreference(onRefresh: () -> Unit) {
  * squeeze a plain `size(24.dp)` icon down to nothing. The rest of the layout is byte-for-byte what
  * the library produced: same 16.dp inside margin, same font sizes/weights/colours, same 20.dp icon
  * gap, and a summary that keeps the library's 44.dp content-column indent (plus an end inset only
- * when the header also carries an end action).
+ * when the header also carries an end action). An optional `onClick` turns the same row into the
+ * card's disclosure row without changing a single metric of the one-line or two-line header.
  */
 @Composable
 private fun HeaderComponentMiuix(
@@ -700,8 +760,12 @@ private fun HeaderComponentMiuix(
     summary: String? = null,
     titleColor: Color = colorScheme.onBackground,
     endActions: (@Composable RowScope.() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
-    BasicComponent(endActions = endActions) {
+    // The library only presents its press feedback when it is handed a handler, so the disclosure
+    // row passes one and the plain card headers stay un-clickable. Branching keeps an explicit no-op
+    // handler away from the thirteen headers that never had one.
+    val headerContent: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // A zero-height slot: the 24.dp icon is drawn centred on it, overflowing symmetrically,
             // which puts the icon's centre exactly on the title's centre without growing the row.
@@ -740,6 +804,11 @@ private fun HeaderComponentMiuix(
                 )
             )
         }
+    }
+    if (onClick == null) {
+        BasicComponent(endActions = endActions) { headerContent() }
+    } else {
+        BasicComponent(endActions = endActions, onClick = onClick) { headerContent() }
     }
 }
 

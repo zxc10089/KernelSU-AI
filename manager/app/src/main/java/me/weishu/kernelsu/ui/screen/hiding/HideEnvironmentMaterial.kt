@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,9 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
@@ -67,6 +71,8 @@ import me.weishu.kernelsu.ui.component.material.SegmentedSwitchItem
 import me.weishu.kernelsu.ui.component.material.expressiveTopAppBarColors
 import me.weishu.kernelsu.ui.component.rebootlistpopup.rememberRebootAction
 import me.weishu.kernelsu.ui.component.statustag.StatusTag
+import me.weishu.kernelsu.ui.icon.HideEnvironmentIcon
+import me.weishu.kernelsu.ui.icon.HideEnvironmentIconOutlined
 
 @Composable
 fun HideEnvironmentPagerMaterial(
@@ -167,6 +173,8 @@ private fun EnvironmentStatusColumnMaterial(
         .filter { it.isNotBlank() }
         .joinToString(" | ")
 
+    val detailsExpanded = remember { mutableStateOf(false) }
+
     SegmentedColumn(
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 13.dp),
         title = stringResource(id = R.string.hide_environment_status_title),
@@ -185,33 +193,14 @@ private fun EnvironmentStatusColumnMaterial(
             add {
                 StatusRow(
                     icon = Icons.Filled.Info,
-                    title = stringResource(id = R.string.hide_environment_kernel_uapi),
-                    summary = uiState.kernelUapiVersion.toString()
-                )
-            }
-            add {
-                StatusRow(
-                    icon = Icons.Filled.Info,
-                    title = stringResource(id = R.string.hide_environment_manager_uapi),
-                    summary = uiState.managerUapiVersion.toString()
-                )
-            }
-            add {
-                StatusRow(
-                    icon = Icons.Filled.Info,
                     title = stringResource(id = R.string.hide_environment_selinux_status),
                     summary = uiState.selinuxStatus
                 )
             }
-            // Boolean capabilities are only rendered when they hold; the repo has no yes/no string key.
-            if (uiState.isFullFeatured) {
-                add {
-                    StatusRow(
-                        icon = Icons.Filled.CheckCircle,
-                        title = stringResource(id = R.string.hide_environment_full_featured)
-                    )
-                }
-            }
+            // Degraded states stay visible without expanding: only the purely informational UAPI rows
+            // and the all-good capability row fold into the disclosure row below, so a device that
+            // needs attention is never hidden behind a tap. Boolean capabilities are only rendered
+            // when they hold; the repo has no yes/no string key.
             if (uiState.isSafeMode) {
                 add {
                     StatusRow(
@@ -226,6 +215,47 @@ private fun EnvironmentStatusColumnMaterial(
                         icon = Icons.Filled.RestartAlt,
                         title = stringResource(id = R.string.hide_environment_late_load)
                     )
+                }
+            }
+            add {
+                SegmentedListItem(
+                    onClick = { detailsExpanded.value = !detailsExpanded.value },
+                    headlineContent = { Text(stringResource(id = R.string.hide_environment_status_details)) },
+                    leadingContent = { Icon(Icons.Filled.Info, null) },
+                    trailingContent = {
+                        Icon(
+                            imageVector = if (detailsExpanded.value) {
+                                Icons.Filled.KeyboardArrowUp
+                            } else {
+                                Icons.Filled.KeyboardArrowDown
+                            },
+                            contentDescription = null
+                        )
+                    }
+                )
+            }
+            if (detailsExpanded.value) {
+                add {
+                    StatusRow(
+                        icon = Icons.Filled.Info,
+                        title = stringResource(id = R.string.hide_environment_kernel_uapi),
+                        summary = uiState.kernelUapiVersion.toString()
+                    )
+                }
+                add {
+                    StatusRow(
+                        icon = Icons.Filled.Info,
+                        title = stringResource(id = R.string.hide_environment_manager_uapi),
+                        summary = uiState.managerUapiVersion.toString()
+                    )
+                }
+                if (uiState.isFullFeatured) {
+                    add {
+                        StatusRow(
+                            icon = Icons.Filled.CheckCircle,
+                            title = stringResource(id = R.string.hide_environment_full_featured)
+                        )
+                    }
                 }
             }
             // The only refresh entry point inside the page content: it used to hide at the bottom of
@@ -268,7 +298,7 @@ private fun HidingSwitchesColumnMaterial(uiState: HideEnvironmentUiState, action
             },
             {
                 SegmentedSwitchItem(
-                    icon = Icons.Filled.LayersClear,
+                    icon = Icons.Filled.Layers,
                     title = stringResource(id = R.string.settings_kernel_umount),
                     summary = materialFeatureStatusSummary(
                         status = uiState.kernelUmountStatus,
@@ -1115,4 +1145,34 @@ private fun StepLogMaterialPreview() {
 @Composable
 private fun StepLogMaterialMdpiPreview() {
     StepLogMaterialPreview()
+}
+
+/**
+ * P2-1: this is the only vector in the page whose fill relies on `PathFillType.EvenOdd`, and its
+ * 1.8dp stroke variant is the only stroke-only vector in the app. Both are drawn here at 24dp, the
+ * size the bottom bar uses, and the second preview renders at mdpi where 24dp is exactly 24px: the
+ * tightest gap in the geometry (subpath 2 to the bottom-right fold, 1.5041dp) has the least room to
+ * disappear there. Compositing the two variants side by side is the only runtime check that this
+ * module can run without a device — no test source set is allowed to cover the icon.
+ */
+@Preview(name = "HideEnvironmentIcon 24dp")
+@Preview(name = "HideEnvironmentIcon mdpi 24px", device = "spec:width=64dp,height=64dp,dpi=160")
+@Composable
+private fun HideEnvironmentIconPreview() {
+    Row(
+        modifier = Modifier.padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = HideEnvironmentIcon,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp)
+        )
+        Icon(
+            imageVector = HideEnvironmentIconOutlined,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp)
+        )
+    }
 }

@@ -320,6 +320,7 @@
 <string name="hide_environment_late_load">Late load mode</string>
 <string name="hide_environment_kernel_release">Kernel release</string>
 <string name="hide_environment_selinux_status">SELinux status</string>
+<string name="hide_environment_status_details">Details</string>
 <string name="hide_environment_switches_title">Hiding controls</string>
 <string name="hide_environment_pack_title">Hiding resource pack</string>
 <string name="hide_environment_pack_summary">Bundled modules that can be installed with one tap</string>

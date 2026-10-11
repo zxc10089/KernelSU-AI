@@ -209,7 +209,7 @@ SVG 中额外的引导几何注释（安全区、斜条中线与宽度、轮廓�
 | 顺序 | 分区 | Miuix（`ui/screen/hiding/HideEnvironmentMiuix.kt`） | Material（`ui/screen/hiding/HideEnvironmentMaterial.kt`） |
 | --- | --- | --- | --- |
 | 1 | 运行模式横幅（模式的唯一出口，三态 + `StatusTag`） | `RuntimeModeBannerMiuix` | `RuntimeModeBannerMaterial` |
-| 2 | 环境状态总览（4 条常显行 + 条件行 + 刷新行） | `EnvironmentStatusCardMiuix` | `EnvironmentStatusColumnMaterial` |
+| 2 | 环境状态总览（2 条常显行 + 条件行 + 「详细信息」展开行 + 刷新行） | `EnvironmentStatusCardMiuix` | `EnvironmentStatusColumnMaterial` |
 | 3 | 能力不支持提示（`!isFullFeatured` 时**只替换动作区**，1、2 恒显） | `UnsupportedCardMiuix` | `UnsupportedColumnMaterial` |
 | 4 | 隐藏开关区（3 个开关） | `HidingSwitchesCardMiuix`（3 个 `SwitchPreference`） | `HidingSwitchesColumnMaterial`（`SegmentedSwitchItem`） |
 | 5 | 一键隐藏（LSPosed 依赖提示、救砖提示、执行按钮、步骤日志） | `OneKeyHideCardMiuix` | `OneKeyHideColumnMaterial` |
