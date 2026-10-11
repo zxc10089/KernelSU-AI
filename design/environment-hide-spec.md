@@ -429,6 +429,43 @@ moveTo, lineTo, lineTo, lineTo, close
 | P2-4 | 步骤日志位于 `LazyColumn` 的 item 内，主轴方向会拿到无限高约束，`verticalScroll` 会在测量期抛异常 | 顺序固定为 `heightIn(max = 160.dp)` **先于** `verticalScroll` | 同上 |
 | P2-5 | 旧的体积行 `hide_environment_risk_size`（"61.0 → 116.8 MB"）已无意义 | 从 UI 移除渲染点；键**保留**（重命名既有 `hide_environment*` 键属禁止项） | 同上 |
 
+### 6.1 落地状态与验证方式
+
+上表的「落地」列是**落点文件**；本节记录**验证方式与状态**。13 项代码侧全部落地，分散在 `411de8a`（本页首版）、`fe50845`（完整性层与字符串）、`c3eba57`（运行模式过滤、推荐分支、信息层级重排、底栏与图标）、`b5c262f`（PathMask 作用域与两主题死按钮）、`d1f225f`（状态卡收纳与 Miuix 行组件）五个提交里。
+
+表中第二列是 `git log -1 -S<该项独有符号> -- <hiding 目录>` 的结果，即**最后一次改动该项的提交**，用于定位代码；真机验证设备为 OPPO PMA110、1200×2670、密度 480（逻辑宽 400dp）、LKM 模式、内核 `6.6.77-android15`。
+
+| # | 最后改动该项的提交 | 验证方式 | 状态 |
+| --- | --- | --- | --- |
+| P0-1 | `c3eba57`（`isLkmMode`） | 真机：运行模式横幅是页面唯一的模式出口，状态卡内没有第二份 | 已验 |
+| P0-2 | `c3eba57`（提交信息即「重排信息层级」） | 真机：滚动 5 屏核对 8 区顺序（横幅→状态→开关→一键隐藏→快捷安装→资源包→只读状态→风险许可） | 已验 |
+| P0-3 | `c3eba57`（`RefreshPreference`） | 真机：Miuix 状态卡内刷新行落在首屏；Material 顶栏 ↻ 与卡内行各自可达 | 已验 |
+| P0-4 | `411de8a`（`risk_license`） | 真机：风险与许可为页尾独立卡，不再出现在状态卡内 | 已验 |
+| P1-1 | `c3eba57`（`PendingReboot`） | 代码：`HidingPackInstallState.PendingReboot` 分支；本机 `/data/adb/modules_update` 无归档，真机未复现 | 仅代码 |
+| P1-2 | `c3eba57`（`onekey_no_branch`） | 真机：变体行 summary 带 `android15-6.6` 分支，本机有匹配分支故未触发「无匹配」行 | 一半（有分支路径） |
+| P1-3 | `fe50845`（`onTertiaryContainer`） | 真机：`LKM` 标签为 `primary` 药丸；`Unknown`/`GkiBuiltIn` 在本机不可复现 | 部分 |
+| P1-4 | `411de8a`（`appliesTo`） | 真机：横幅计数「已按 LKM 模式过滤，共隐藏 1 项」 | 已验 |
+| P2-1 | `d1f225f`（`HideEnvironmentIconOutlined`） | 真机截图：Material 底栏选中=实心+指示器、未选中=描边（两矢量的配对来自 `c3eba57`）；`d1f225f` 另加 `@Preview` | 已验 |
+| P2-2 | `c3eba57`（底栏 `Ellipsis`） | 真机 360dp（`wm size 1080x2400`，密度 480）：五个标签完整、无省略号，两主题一致 | 已验 |
+| P2-3 | `411de8a`（`HEADER_SUMMARY_INSET`） | 真机：状态卡卡头、行标题、副文本左边界一致（标题 x=215），未出现常量漂移 | 已验 |
+| P2-4 | `fe50845`（`heightIn`） | 静态：`heightIn(max = 160.dp)` 在 `verticalScroll` 之前；日志出现时机依赖清理动作，未在真机复现 | 仅代码 |
+| P2-5 | 键保留、本分支历史中无渲染点（`git log -S hide_environment_risk_size` 在 hiding 目录无命中） | 真机：页尾风险卡只有标题与许可文案，无体积行 | 已验 |
+
+窄屏复测方法（本轮用过，可复用）：`adb shell wm size 1080x2400` 把逻辑宽从 400dp 压到 360dp，测完 `adb shell wm size reset`；设备默认 `Override density: 480` 才是 400dp 的来源。
+
+### 6.2 复验阶段追加的四项（`d1f225f`）
+
+真机复验时暴露的问题，与上表同批交付：
+
+| # | 问题 | 调整 | 验证 |
+| --- | --- | --- | --- |
+| A-1 | 状态卡把两条 UAPI 行与 all-good 行常显，首屏被纯信息行占满 | 折进新增的「详细信息」展开行（`hide_environment_status_details`，两个主题同构）；条件行（安全模式、延迟加载）与降级态保持常显，不折进展开区 | 真机：折叠 4 行，展开后出现 `内核 UAPI 版本 2`、`管理器 UAPI 版本 2`、「功能完整」，刷新行下移 |
+| A-2 | Miuix 卡片混用 `ArrowPreference` 与 `HeaderComponentMiuix`：同一行出现两个尾部字形（自带 chevron 与 `endActions`），且两种组件左内边距差 18px | 刷新行与展开行统一改用 `HeaderComponentMiuix`（新增可选 `onClick`，按 null 分支以避开无 sources 的库签名）；展开箭头用 rounded `KeyboardArrowUp/Down`（Miuix 自带 `ExpandMore` 是四角展开字形，不是 chevron），刷新行沿用库自带 `Basic.ArrowRight` | 真机：四行标题 x 同为 215，每行只有一个尾部字形 |
+| A-3 | 「卸载模块（内核级）」用 `LayersClear`，与 PathMask 分类图标撞车 | 改 `Layers`；`LayersClear` 只留给 PathMask 分类 | 真机截图 |
+| A-4 | 本页唯一的 `EvenOdd` 填充矢量与唯一 1.8dp 描边矢量没有运行期检查手段 | 在 `HideEnvironmentMaterial.kt` 末尾加双 `@Preview`（24dp 与 mdpi 24px，并排渲染实心与描边）；图标与主题无关，一处即可 | IDE 预览（本模块无可用测试源集） |
+
+合计待办口径：13 项主表 + 4 项追加 + §5.3 的 360dp 底栏预算复测 = 18 条。
+
 ### 只登记、不对齐的两处（有意保留）
 
 1. **两个主题的 1dp 组底距差异**：Material 的组底距是 `bottom = 13.dp`，Miuix 的卡只有 `top = 12.dp`。两者各自与所属主题的其它页面一致，不为对齐而改 token。
