@@ -17,6 +17,7 @@ import me.weishu.kernelsu.data.agent.AiAuditEntry
 import me.weishu.kernelsu.data.agent.AiAuditUndo
 import me.weishu.kernelsu.data.repository.AiAuditRepository
 import me.weishu.kernelsu.data.repository.AiAuditRepositoryImpl
+import me.weishu.kernelsu.ui.screen.aiaudit.AiAuditBatch
 import me.weishu.kernelsu.ui.screen.aiaudit.AiAuditItem
 import me.weishu.kernelsu.ui.screen.aiaudit.AiAuditResult
 import me.weishu.kernelsu.ui.screen.aiaudit.AiAuditUiState
@@ -47,11 +48,13 @@ class AiAuditViewModel(
                 repository.read(READ_LIMIT).filter { it.origin == AiAuditEntry.ORIGIN_ASSISTANT }
             }.fold(
                 onSuccess = { entries ->
+                    val items = entries.map { entry -> toItem(entry) }
                     _uiState.update {
                         it.copy(
                             loading = false,
                             error = false,
-                            items = entries.map { entry -> toItem(entry) },
+                            items = items,
+                            batches = toBatches(items),
                         )
                     }
                 },
@@ -68,6 +71,12 @@ class AiAuditViewModel(
         }
     }
 
+    fun toggleBatchDetail(batch: AiAuditBatch) {
+        _uiState.update {
+            it.copy(expandedBatch = if (it.expandedBatch == batch.batchId) null else batch.batchId)
+        }
+    }
+
     fun undo(item: AiAuditItem) {
         if (!undo.supports(item.entry)) {
             _uiState.update { it.copy(result = AiAuditResult.Unsupported) }
@@ -76,7 +85,9 @@ class AiAuditViewModel(
         viewModelScope.launch {
             val outcome = undo.undo(item.entry)
             outcome.fold(
-                onSuccess = { _uiState.update { state -> state.copy(result = AiAuditResult.Undone) } },
+                onSuccess = {
+                    _uiState.update { state -> state.copy(result = AiAuditResult.Undone(count = 1)) }
+                },
                 onFailure = { failure ->
                     _uiState.update { state ->
                         state.copy(result = AiAuditResult.Failed(failure.message.orEmpty()))
@@ -84,6 +95,54 @@ class AiAuditViewModel(
                 },
             )
             refresh()
+        }
+    }
+
+    /**
+     * Reverses one batch with a single tap.
+     *
+     * The row is only offered when at least one member can be reversed, and the summary keeps a
+     * partial reversal visible: "已撤销 3 项，2 项失败" is the honest report, not a bare "已撤销".
+     */
+    fun undoBatch(batch: AiAuditBatch) {
+        val entries = batch.items.map { it.entry }
+        if (entries.none { undo.supports(it) }) {
+            _uiState.update { it.copy(result = AiAuditResult.Unsupported) }
+            return
+        }
+        viewModelScope.launch {
+            undo.undoBatch(entries).fold(
+                onSuccess = { summary ->
+                    _uiState.update { state ->
+                        state.copy(
+                            result = AiAuditResult.Undone(count = summary.undone, failed = summary.failed),
+                        )
+                    }
+                },
+                onFailure = { failure ->
+                    _uiState.update { state ->
+                        state.copy(result = AiAuditResult.Failed(failure.message.orEmpty()))
+                    }
+                },
+            )
+            refresh()
+        }
+    }
+
+    /** 把同一批次号的记录聚合成一行；单条动作没有批次号，只留在完整历史里。 */
+    private fun toBatches(items: List<AiAuditItem>): List<AiAuditBatch> {
+        val groups = LinkedHashMap<String, MutableList<AiAuditItem>>()
+        for (item in items) {
+            val id = item.entry.batchId ?: continue
+            groups.getOrPut(id) { ArrayList() }.add(item)
+        }
+        return groups.entries.map { (id, members) ->
+            AiAuditBatch(
+                batchId = id,
+                time = timeFormat.format(Date(members.maxOf { it.entry.ts })),
+                items = members,
+                undoableCount = members.count { it.undoable },
+            )
         }
     }
 
@@ -131,6 +190,17 @@ class AiAuditViewModel(
         AiActionExecutorImpl.KIND_SAFE_EXEC -> R.string.ai_audit_kind_safe_exec
         AiAuditEntry.KIND_SCOPE_CHANGE -> R.string.ai_audit_kind_scope
         AiAuditEntry.KIND_UNDO -> R.string.ai_audit_kind_undo
+        AiAuditEntry.KIND_APP_STATE -> R.string.ai_audit_kind_app_state
+        AiAuditEntry.KIND_ROOT_POLICY -> R.string.ai_audit_kind_root_policy
+        AiAuditEntry.KIND_FILE_WRITE -> R.string.ai_audit_kind_file_write
+        AiAuditEntry.KIND_FILE_MOVE -> R.string.ai_audit_kind_file_move
+        AiAuditEntry.KIND_FILE_DELETE -> R.string.ai_audit_kind_file_delete
+        AiAuditEntry.KIND_MKDIR -> R.string.ai_audit_kind_mkdir
+        AiAuditEntry.KIND_MODULE_BACKUP -> R.string.ai_audit_kind_module_backup
+        AiAuditEntry.KIND_MODULE_RESTORE -> R.string.ai_audit_kind_module_restore
+        AiAuditEntry.KIND_SCHEDULE_WRITE -> R.string.ai_audit_kind_schedule_write
+        AiAuditEntry.KIND_ARCHIVE_EXTRACT -> R.string.ai_audit_kind_archive_extract
+        AiAuditEntry.KIND_APP_DESTRUCTIVE -> R.string.ai_audit_kind_app_destructive
         else -> R.string.ai_audit_kind_other
     }
 

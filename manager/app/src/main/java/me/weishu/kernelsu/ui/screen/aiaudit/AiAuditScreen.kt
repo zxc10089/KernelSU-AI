@@ -31,27 +31,50 @@ fun AiAuditScreen() {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var pendingUndo by remember { mutableStateOf<AiAuditItem?>(null) }
+    var pendingBatchUndo by remember { mutableStateOf<AiAuditBatch?>(null) }
     val currentUndo by rememberUpdatedState(pendingUndo)
+    val currentBatchUndo by rememberUpdatedState(pendingBatchUndo)
     val undoLabel = stringResource(R.string.ai_audit_undo)
     val dismissLabel = stringResource(android.R.string.cancel)
     val undoTitle = stringResource(R.string.ai_audit_undo_title)
     val undoMessage = stringResource(R.string.ai_audit_undo_message)
+    val batchUndoTitle = stringResource(R.string.ai_audit_batch_undo_title)
+    val batchUndoMessage = stringResource(R.string.ai_audit_batch_undo_message)
     val pendingTarget = pendingUndo?.let { item -> item.entry.target.ifBlank { stringResource(item.kindRes) } }
+    val pendingBatchTarget = pendingBatchUndo?.let { batch ->
+        batchUndoMessage.format(batch.items.size, batch.undoableCount)
+    }
     val confirmDialog = rememberConfirmDialog(
         onConfirm = {
             currentUndo?.let(viewModel::undo)
+            currentBatchUndo?.let(viewModel::undoBatch)
             pendingUndo = null
+            pendingBatchUndo = null
         },
-        onDismiss = { pendingUndo = null },
+        onDismiss = {
+            pendingUndo = null
+            pendingBatchUndo = null
+        },
     )
-    LaunchedEffect(pendingUndo) {
-        val target = pendingTarget ?: return@LaunchedEffect
-        confirmDialog.showConfirm(
-            title = undoTitle,
-            content = undoMessage.format(target),
-            confirm = undoLabel,
-            dismiss = dismissLabel,
-        )
+    LaunchedEffect(pendingUndo, pendingBatchUndo) {
+        if (pendingUndo != null) {
+            val target = pendingTarget ?: return@LaunchedEffect
+            confirmDialog.showConfirm(
+                title = undoTitle,
+                content = undoMessage.format(target),
+                confirm = undoLabel,
+                dismiss = dismissLabel,
+            )
+        } else {
+            // A whole batch is reversed in one tap, so the range is spelled out before it runs.
+            val target = pendingBatchTarget ?: return@LaunchedEffect
+            confirmDialog.showConfirm(
+                title = batchUndoTitle,
+                content = target,
+                confirm = undoLabel,
+                dismiss = dismissLabel,
+            )
+        }
     }
 
     val actions = AiAuditActions(
@@ -59,10 +82,17 @@ fun AiAuditScreen() {
         onRefresh = viewModel::refresh,
         onToggleDetail = viewModel::toggleDetail,
         onUndo = { item -> pendingUndo = item },
+        onToggleBatchDetail = viewModel::toggleBatchDetail,
+        onUndoBatch = { batch -> pendingBatchUndo = batch },
     )
 
     val resultText = when (val result = uiState.result) {
-        AiAuditResult.Undone -> stringResource(R.string.ai_audit_undo_done)
+        is AiAuditResult.Undone -> if (result.failed > 0) {
+            stringResource(R.string.ai_audit_undo_partial, result.count, result.failed)
+        } else {
+            stringResource(R.string.ai_audit_undo_done, result.count)
+        }
+
         is AiAuditResult.Failed -> stringResource(R.string.ai_audit_undo_failed, result.reason)
         AiAuditResult.Unsupported -> stringResource(R.string.ai_audit_undo_unsupported)
         null -> null

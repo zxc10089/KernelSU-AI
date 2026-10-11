@@ -114,6 +114,24 @@ fun AiAuditPagerMiuix(
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
+            if (uiState.batches.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.ai_audit_batch_title),
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                uiState.batches.forEach { batch ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    AiAuditBatchRowMiuix(
+                        batch = batch,
+                        expanded = uiState.expandedBatch == batch.batchId,
+                        actions = actions,
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+            }
             when {
                 uiState.loading -> {
                     Box(
@@ -253,4 +271,77 @@ private fun AiAuditResultChipMiuix(item: AiAuditItem) {
             )
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
+}
+
+/**
+ * 一次批量确认对应一行：展开看成员，点一下撤销整批。与 AiAuditBatchRowMaterial 同形。
+ *
+ * 只有 [AiAuditBatch.undoableCount] 大于 0 时才给撤销入口，摘要也把「几项可撤销」写清楚，
+ * 避免把一个只有部分条目能反向执行的批次说成可以整体还原。
+ */
+@Composable
+private fun AiAuditBatchRowMiuix(
+    batch: AiAuditBatch,
+    expanded: Boolean,
+    actions: AiAuditActions,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { actions.onToggleBatchDetail(batch) }
+                .padding(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(R.string.ai_audit_batch_title),
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = batch.time,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.ai_audit_batch_summary,
+                    batch.items.size,
+                    batch.undoableCount,
+                ),
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                color = colorScheme.onSurfaceVariantSummary,
+            )
+            if (expanded) {
+                batch.items.forEach { item ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(item.kindRes),
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        color = colorScheme.onSurface,
+                    )
+                    val subtitle = aiAuditSubtitle(item)
+                    if (subtitle.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = subtitle,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            color = colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+            if (batch.undoableCount > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    text = stringResource(R.string.ai_audit_batch_undo),
+                    onClick = { actions.onUndoBatch(batch) },
+                )
+            }
+        }
+    }
 }
