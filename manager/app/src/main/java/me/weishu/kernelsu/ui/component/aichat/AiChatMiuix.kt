@@ -1,17 +1,20 @@
 package me.weishu.kernelsu.ui.component.aichat
 
+import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -22,15 +25,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import me.weishu.kernelsu.R
 import me.weishu.kernelsu.data.agent.AiAction
 import me.weishu.kernelsu.data.agent.AiAgentLog
@@ -41,9 +50,16 @@ import me.weishu.kernelsu.ui.screen.aiassistant.AiConsoleMessage
 import me.weishu.kernelsu.ui.screen.aiassistant.AiPlanItem
 import me.weishu.kernelsu.ui.screen.aiassistant.AiRole
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Copy
+import top.yukonga.miuix.kmp.icon.extended.ExpandLess
+import top.yukonga.miuix.kmp.icon.extended.ExpandMore
+import top.yukonga.miuix.kmp.icon.extended.Ok
+import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import java.text.SimpleDateFormat
@@ -59,12 +75,13 @@ fun AiMessageMiuix(
     onRevisePlan: () -> Unit = {},
     onAbortPlan: () -> Unit = {},
     onOpenModuleMaker: () -> Unit = {},
+    onRetryAction: (Long) -> Unit = {},
 ) {
     if (message.hidden) return
     when (message.role) {
         AiRole.USER -> AiUserBubbleMiuix(message.text)
         AiRole.ASSISTANT -> Column(modifier = Modifier.fillMaxWidth()) {
-            message.reasoning?.takeIf { it.isNotBlank() }?.let { AiReasoningCardMiuix(it) }
+            message.reasoning?.takeIf { it.isNotBlank() }?.let { AiReasoningCardMiuix(it, message.id) }
             if (message.text.isNotBlank()) {
                 Text(
                     text = aiRichText(message.text, codeBackground = colorScheme.surfaceContainerHigh),
@@ -86,11 +103,12 @@ fun AiMessageMiuix(
                     onRevise = onRevisePlan,
                     onAbort = onAbortPlan,
                     onOpenModuleMaker = onOpenModuleMaker,
+                    onRetryAction = onRetryAction,
                 )
             } else {
                 message.actions.forEach { item ->
                     Spacer(modifier = Modifier.height(8.dp))
-                    AiActionCardMiuix(item, onOpenModuleMaker)
+                    AiActionCardMiuix(item, onOpenModuleMaker, onRetryAction)
                 }
             }
         }
@@ -137,8 +155,12 @@ fun AiThinkingMiuix() {
 
 /** Collapsed reasoning block; a reasoning model can stream thousands of characters. */
 @Composable
-fun AiReasoningCardMiuix(reasoning: String) {
-    var expanded by remember(reasoning) { mutableStateOf(false) }
+fun AiReasoningCardMiuix(reasoning: String, messageId: Long) {
+    // Keyed on the message, never on the streaming text: `reasoning` changes on every chunk while
+    // the model is still thinking, so a text key recreated this state again and again and the card
+    // snapped back to collapsed immediately after a tap. Collapsing only hides the text below — the
+    // stream keeps arriving and the ViewModel keeps appending to `reasoning`.
+    var expanded by remember(messageId) { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -149,7 +171,12 @@ fun AiReasoningCardMiuix(reasoning: String) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded },
+                    .heightIn(min = 48.dp)
+                    .clickable(
+                        onClickLabel = stringResource(
+                            if (expanded) R.string.ai_console_log_collapse else R.string.ai_console_log_expand,
+                        ),
+                    ) { expanded = !expanded },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -167,6 +194,13 @@ fun AiReasoningCardMiuix(reasoning: String) {
                     },
                     fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     color = aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = if (expanded) MiuixIcons.ExpandLess else MiuixIcons.ExpandMore,
+                    contentDescription = null,
+                    tint = aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh),
+                    modifier = Modifier.size(16.dp),
                 )
             }
             if (expanded) {
@@ -186,80 +220,203 @@ fun AiReasoningCardMiuix(reasoning: String) {
 
 /** One proposed or executed operation: tier, status, target and captured output. */
 @Composable
-fun AiActionCardMiuix(item: AiActionItem, onOpenModuleMaker: () -> Unit = {}) {
+fun AiActionCardMiuix(
+    item: AiActionItem,
+    onOpenModuleMaker: () -> Unit = {},
+    onRetry: (Long) -> Unit = {},
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(colorScheme.surfaceContainerHigh),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = aiActionTitle(item.action),
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
-                    fontWeight = FontWeight.Medium,
-                    color = colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                aiTierLabel(item.tier)?.let { label ->
-                    AiChipMiuix(text = label, danger = item.tier == AiSafetyTier.STRICT)
-                    Spacer(modifier = Modifier.width(6.dp))
+        // The verdict stripe runs the full height of the card, so the row measures its content first.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+        ) {
+            AiResultStripe(item.status)
+            Column(modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = aiActionTitle(item.action),
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        color = colorScheme.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    aiTierLabel(item.tier)?.let { label ->
+                        AiChipMiuix(text = label, danger = item.tier == AiSafetyTier.STRICT)
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    AiChipMiuix(text = aiStatusLabel(item.status), danger = false)
                 }
-                AiChipMiuix(text = aiStatusLabel(item.status), danger = false)
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = aiActionTarget(item.action),
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                fontFamily = FontFamily.Monospace,
-                color = colorScheme.onSurfaceVariantSummary,
-            )
-            if (item.action is AiAction.MakeModule) {
                 Spacer(modifier = Modifier.height(6.dp))
-                TextButton(
-                    text = stringResource(R.string.ai_console_module_open_editor),
-                    onClick = onOpenModuleMaker,
-                )
-            }
-            item.action.reason?.takeIf { it.isNotBlank() }?.let { reason ->
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = reason,
+                    text = aiActionTarget(item.action),
                     fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    fontFamily = FontFamily.Monospace,
                     color = colorScheme.onSurfaceVariantSummary,
                 )
-            }
-            if (item.status == AiActionStatus.DENIED || item.status == AiActionStatus.CANCELLED) {
-                item.note?.takeIf { it.isNotBlank() }?.let { note ->
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = note,
-                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                        color = colorScheme.error,
+                if (item.action is AiAction.MakeModule) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    TextButton(
+                        text = stringResource(R.string.ai_console_module_open_editor),
+                        onClick = onOpenModuleMaker,
                     )
                 }
-            }
-            if (item.status == AiActionStatus.FAILED) {
-                aiFriendlyError(item.output)?.let { friendly ->
+                item.action.reason?.takeIf { it.isNotBlank() }?.let { reason ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "\u26a0\ufe0f " + friendly,
+                        text = reason,
                         fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                        color = colorScheme.error,
+                        color = colorScheme.onSurfaceVariantSummary,
                     )
                 }
-            }
-            item.output?.takeIf { it.isNotBlank() }?.let { output ->
-                Spacer(modifier = Modifier.height(8.dp))
-                AiOutputSectionMiuix(output)
+                if (item.status == AiActionStatus.DENIED || item.status == AiActionStatus.CANCELLED) {
+                    item.note?.takeIf { it.isNotBlank() }?.let { note ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = note,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            color = colorScheme.error,
+                        )
+                    }
+                }
+                if (item.status == AiActionStatus.FAILED) {
+                    aiFriendlyError(item.output)?.let { friendly ->
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = friendly,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            color = colorScheme.error,
+                        )
+                    }
+                }
+                item.output?.takeIf { it.isNotBlank() }?.let { output ->
+                    Spacer(modifier = Modifier.height(8.dp))
+                    AiOutputSectionMiuix(output)
+                }
+                AiResultFooterMiuix(item, onRetry)
             }
         }
     }
 }
+
+/**
+ * The copy / retry line under one result. Copy is offered whenever there is something to take away;
+ * retry only for the outcomes that left the device untouched (failed, refused, cancelled, skipped),
+ * because re-running a write that already succeeded is a footgun rather than a convenience.
+ */
+@Composable
+private fun AiResultFooterMiuix(item: AiActionItem, onRetry: (Long) -> Unit) {
+    val output = item.output?.takeIf { it.isNotBlank() }
+    val note = item.note?.takeIf { it.isNotBlank() }
+    // A refusal carries no output but does carry the reason, and that is exactly what gets shared.
+    val copyable = output != null || note != null
+    val retryable = item.status == AiActionStatus.FAILED || item.status == AiActionStatus.DENIED ||
+        item.status == AiActionStatus.CANCELLED || item.status == AiActionStatus.SKIPPED
+    if (!copyable && !retryable) return
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    val title = aiActionTitle(item.action)
+    val target = aiActionTarget(item.action)
+    val status = aiStatusLabel(item.status)
+    // The label flips to "copied" for a moment as the only visible proof the tap landed.
+    var copied by remember(item.id, item.output, item.note) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(COPIED_LABEL_MS)
+            copied = false
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (copyable) {
+            // Filled capsule: the primary action sits on one step above the card surface.
+            Row(
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(colorScheme.surfaceContainerHighest)
+                    .clickable(onClickLabel = stringResource(R.string.ai_console_result_copy)) {
+                        val text = aiResultCopyText(title, target, status, note, output)
+                        // setClipEntry suspends, so the label only flips once the clipboard really holds it.
+                        scope.launch {
+                            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(CLIP_LABEL, text)))
+                            copied = true
+                        }
+                    }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The icon swaps with the label, so "copied" is never signalled by colour alone.
+                Icon(
+                    imageVector = if (copied) MiuixIcons.Ok else MiuixIcons.Copy,
+                    contentDescription = null,
+                    tint = colorScheme.onSurface,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = stringResource(
+                        if (copied) R.string.ai_console_result_copied else R.string.ai_console_result_copy,
+                    ),
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (retryable) {
+            // Outlined capsule: restarts an authorisation gate, so it must read as the secondary action.
+            Row(
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .border(1.dp, colorScheme.outline, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClickLabel = stringResource(R.string.ai_console_result_retry)) {
+                        onRetry(item.id)
+                    }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = MiuixIcons.Refresh,
+                    contentDescription = null,
+                    tint = colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.ai_console_result_retry),
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+// Long enough that the confirmation is still on screen when the user looks back at the card.
+private const val COPIED_LABEL_MS = 4000L
+private const val CLIP_LABEL = "kernelsu-ai"
+private const val AGENT_LOG_TAG = "AI_AGENT"
 
 /**
  * A captured result stays one line tall; short results open themselves because hiding them would
@@ -272,7 +429,12 @@ fun AiOutputSectionMiuix(output: String) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded },
+                .heightIn(min = 48.dp)
+                .clickable(
+                    onClickLabel = stringResource(
+                        if (expanded) R.string.ai_console_log_collapse else R.string.ai_console_log_expand,
+                    ),
+                ) { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -290,6 +452,13 @@ fun AiOutputSectionMiuix(output: String) {
                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 color = aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh),
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = if (expanded) MiuixIcons.ExpandLess else MiuixIcons.ExpandMore,
+                contentDescription = null,
+                tint = aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh),
+                modifier = Modifier.size(16.dp),
             )
         }
         if (expanded) {
@@ -346,23 +515,82 @@ fun AiAgentLogPanelMiuix(
 ) {
     val scrollState = rememberScrollState()
     val formatter = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
-    LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) scrollState.animateScrollTo(scrollState.maxValue)
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    // Reading a failure out of dozens of lines is the common case, so the panel can hide the noise and
+    // hand the whole thing to the clipboard for a bug report.
+    var errorsOnly by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
+    val errorLines = remember(lines) {
+        lines.filter {
+            it.level == AiAgentLog.Level.DENIED || it.level == AiAgentLog.Level.ERROR
+        }
+    }
+    val shown = if (errorsOnly) errorLines else lines
+    val logTitle = stringResource(R.string.ai_console_agent_log)
+    val logText = remember(lines, logTitle, formatter) {
+        buildString {
+            appendLine("[$AGENT_LOG_TAG] $logTitle")
+            lines.forEach { line ->
+                appendLine(formatter.format(Date(line.ts)) + "  " + line.level + "  " + line.message)
+            }
+        }
+    }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(COPIED_LABEL_MS)
+            copied = false
+        }
+    }
+    LaunchedEffect(shown.size) {
+        if (shown.isNotEmpty()) scrollState.animateScrollTo(scrollState.maxValue)
     }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onToggle() },
+                .heightIn(min = 48.dp)
+                .clickable(
+                    onClickLabel = stringResource(
+                        if (expanded) R.string.ai_console_log_collapse else R.string.ai_console_log_expand,
+                    ),
+                ) { onToggle() },
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "[AI_AGENT] " + stringResource(R.string.ai_console_agent_log),
+                text = "[$AGENT_LOG_TAG] " + logTitle,
                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Medium,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.weight(1f),
             )
+            if (expanded) {
+                AgentLogActionMiuix(
+                    label = stringResource(
+                        if (errorsOnly) {
+                            R.string.ai_console_log_all
+                        } else {
+                            R.string.ai_console_log_errors_only
+                        },
+                    ),
+                    enabled = errorLines.isNotEmpty(),
+                    onClick = { errorsOnly = !errorsOnly },
+                )
+                AgentLogActionMiuix(
+                    label = stringResource(
+                        if (copied) R.string.ai_console_log_copied else R.string.ai_console_log_copy,
+                    ),
+                    enabled = lines.isNotEmpty(),
+                    onClick = {
+                        scope.launch {
+                            clipboard.setClipEntry(
+                                ClipEntry(ClipData.newPlainText(AGENT_LOG_TAG, logText)),
+                            )
+                            copied = true
+                        }
+                    },
+                )
+            }
             Text(
                 text = if (expanded) {
                     stringResource(R.string.ai_console_log_collapse)
@@ -372,6 +600,13 @@ fun AiAgentLogPanelMiuix(
                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 color = aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh),
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = if (expanded) MiuixIcons.ExpandLess else MiuixIcons.ExpandMore,
+                contentDescription = null,
+                tint = aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh),
+                modifier = Modifier.size(16.dp),
             )
         }
         Spacer(modifier = Modifier.height(if (expanded) 4.dp else 0.dp))
@@ -387,7 +622,7 @@ fun AiAgentLogPanelMiuix(
                     .fillMaxWidth()
                     .verticalScroll(scrollState),
             ) {
-                if (lines.isEmpty()) {
+                if (shown.isEmpty()) {
                     Text(
                         text = "-",
                         fontSize = MiuixTheme.textStyles.footnote1.fontSize,
@@ -395,7 +630,7 @@ fun AiAgentLogPanelMiuix(
                         color = TerminalForeground.copy(alpha = 0.5f),
                     )
                 }
-                lines.forEach { line ->
+                shown.forEach { line ->
                     Text(
                         text = formatter.format(Date(line.ts)) + "  " + line.message,
                         fontSize = MiuixTheme.textStyles.footnote1.fontSize,
@@ -413,6 +648,28 @@ fun AiAgentLogPanelMiuix(
     }
 }
 
+/** One text action in the log header; dimmed when it would do nothing. */
+@Composable
+private fun AgentLogActionMiuix(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+        color = if (enabled) {
+            aiLinkColor(colorScheme.primary, colorScheme.surfaceContainerHigh)
+        } else {
+            colorScheme.onSurfaceVariantSummary.copy(alpha = 0.4f)
+        },
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 12.dp),
+    )
+}
+
 /**
  * The batch approval card of plan mode: the whole plan in one place with an explicit decision.
  *
@@ -427,6 +684,7 @@ fun AiPlanCardMiuix(
     onRevise: () -> Unit,
     onAbort: () -> Unit,
     onOpenModuleMaker: () -> Unit = {},
+    onRetryAction: (Long) -> Unit = {},
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -470,7 +728,7 @@ fun AiPlanCardMiuix(
                     color = colorScheme.onSurfaceVariantSummary,
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                AiActionCardMiuix(item, onOpenModuleMaker)
+                AiActionCardMiuix(item, onOpenModuleMaker, onRetryAction)
             }
             if (plan.paused || !plan.running) {
                 Spacer(modifier = Modifier.height(10.dp))

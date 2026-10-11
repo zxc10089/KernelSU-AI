@@ -559,6 +559,33 @@ cargo fmt
 2. **提示词按事实重写**（`data/agent/AiPrompt.kt`）。要点：`run_command` **没有白名单**（按风险分级，只有只读文件命令与设备信息命令自动放行），只有 `safe_exec_shell` 走只读白名单；授权目录内**没有额外文件白名单**，文本文件都可读，二进制与数据库文件被拒绝是**文件类型判断、与授权范围无关**（不要再建议提高范围）；工作方式第 14 条是结果信封的**唯一权威描述**（键序 `ok → tool → status → blocked → data → error → message`，`ok ⟺ status=ok`，`blocked=true` 含 cancelled，`skipped` 表示计划暂停），授权范围段末条只保留「信封唯一权威 + status≠ok 必须如实转述 + 禁止编造/绕行」；不可撤销动作必须单独批准、`delete_file(force=true)` 才是最高确认等级，同轮 3 个以上 MEDIUM 动作统一升档；补上第二种截断标记原文与 `read_file_chunk` 单次 2000 行上限。
 3. **真机证据**。提示词侧用 mock 模型的请求日志抓「真正发给 API 的 system prompt」，三档分别 7469 / 7442 / 7877 字符，旧错误语句在三档中命中数均为 0、新语句按档位命中；两档选择器与默认值取证见根文档 §23.16.3。
 
+## 12. 本轮修复：AI 控制台「只说不做 / 空白卡片 / 执行悬空」（2026-10-11）
+
+用户报了两条 P0：点「查看 Root 日志」后 AI 的思考过程准确，但**没有任何工具调用动作**（客户端日志只写「模型没有提出任何动作，本轮结束」），**卡片是空白的**；以及同一批次里一个动作被安全系统拦截时（`get_system_logs` 需要 ROOT_FS），**整条执行链停在「执行中」**。两条都已修复：客户端不再因为动作块的形状不合协议就当作「模型没提动作」，并且每个动作都必有终态。完整改动清单、真机证据与披露见仓库根 `docs/DEVELOPMENT.md` §23.17。
+
+1. **动作块解析容错**（`data/agent/AiActionParser.kt` 重写解析层）。`parseDetailed` 返回 `AiParseResult(actions, jsonSeen, actionish, malformed)`；除顶层 `{"actions":[…]}` 之外，还接受**顶层数组**、**没有包裹的单个动作对象**（仅当它真的命名了动作）、以及用 `tool` / `tool_name` / 注册表认识的 `name` 代替 `action` 的写法；解析前先修一次 BOM、中文引号与尾逗号。`stripActionBlock` 只剥掉「第一个能解析出动作对象的块」，顶层数组不会再只剥掉首元素而留下裸 JSON。
+2. **信封元数据不再当成工具参数**。`NON_ARG_KEYS = {action, actions, tool, tool_name, reason, summary}`：模型顺手写一个 `summary` / `reason` 不会再把整条动作判成 `validation_failed`——这原本也是「只说不做」的一条来源。
+3. **卡片不再出现空白**。正文三档兜底：有正文/有动作显示正文；只有思考显示「模型思考了这条请求，然后既没有回复正文也没有提出动作」；两者都没有显示「没有可显示的内容」。空 raw 也写一条日志再返回，不再有静默死路。
+4. **一次有界的纠错**。回复里出现动作形状却解析不出动作时，记 `ai_console_log_actions_unparsed`，追加**一条隐藏的纠错请求**（`ai_console_repair_request`，只发一次、仍受 `max_rounds` 约束），要求模型只回一个扁平 JSON 对象；仍失败才结束本轮并如实说明。
+5. **每个动作 60 秒必落定**（`ui/viewmodel/AiConsoleViewModel.kt`）。`runAction()` 把动作放到独立的 `SupervisorJob` 作用域执行（`AiActionExecutor.shell()` 是纯阻塞调用、不可取消，直接包 `withTimeout` 无效），用 `withTimeoutOrNull(ACTION_TIMEOUT_MS = 60_000)` 等它：超时返回 `status=failed` / `error=timeout`（`AiErrorCode.TIMEOUT`）/ 人类可读的 message，异常走同一条路（`ai_console_step_crashed`）。`processActions` 的每条分支都会更新动作卡状态，被拦的动作也不会再拖累同批其它动作。`withBatch` 的 `finally` 改成**只在自己仍是当前标记时才回退**，被放弃的动作晚点跑完不会改掉正在进行那一轮的批次号。
+6. **请求不再带尾随空消息**。每轮发请求前 append 的空 assistant 占位不再进入历史（`buildHistory` 跳过内容为空的 assistant 消息）。
+7. **新增字符串** 7 条（en + zh）：`ai_console_step_timeout`、`ai_console_step_timeout_reason`、`ai_console_step_crashed`、`ai_console_log_actions_unparsed`、`ai_console_notice_no_text`、`ai_console_notice_reasoning_only`、`ai_console_repair_request`。
+8. **真机证据**（`queuelog` 构建，APK md5 `75b5e135b7fdb6ac1e9305d25cb69c6f`，`lastUpdateTime=2026-10-11 19:46:35`；详细表见根 `docs/DEVELOPMENT.md` §23.17.4）。mock 场景 leg1–leg6：`P0BARE` / `P0ARR` / `P0TOOL` / `P0TRAIL` 四条腿 `模型没有提出任何动作`=0、`复制结果`=1，动作被解析（选用的 `get_battery_info` 在 DATA_ADB 下按设计被拦，卡片与信封都给出 `blocked`）；`P0THINKONLY` 腿「然后既没有回复正文也没有提出动作」=1（卡片不空白）。`P0HANG` 腿（`run_command sleep 600`）60 秒后「超过 60 秒仍未返回」=1、`执行中`=0、信封 `"error":"timeout"`。`P8DENY` 腿信封 `"status":"blocked"`。真实 `deepseek-flash` + 建议 chip「查看 Root 日志」：第 1 轮请求 `msgChars=7469,393`（尾随空 assistant 已消失），第 2 轮 `lastUser` 带 `get_ksud_logs 成功：{"ok":true,…,"status":"ok"}` ⇒ 真实模型的动作被解析并真的执行；同轮 `get_root_app_list` 真机卡满 60 秒后落到「超过 60 秒仍未返回，已放弃该动作，本轮继续」，`get_system_logs` 落到「已拦截（该工具需要更高的访问范围：ROOT_FS）」，两条都落定、无悬空。`P0BROKEN2`（双冒号坏块）验证一次纠错：`动作块无法解析` → 隐藏纠错请求（`[客户端] 你上一条回复里的动作块无法解析…`）→ `get_installed_apps` 执行成功、卡片 `已完成`。
+
+> 反例留档：`P0BROKEN`（`{"action": get_battery_info,}` 未加引号的裸值）在真机上被 Android `JSONObject` 的宽松解析读通了，**没有**触发纠错路径——所以纠错闭环用 `P0BROKEN2` 的双冒号形状验证。
+
+## 13. 本轮修复：AI 控制台「队列谎报 / 审批弹窗不弹 / 日志面板」+ 执行可见性（2026-10-11）
+
+用户报：计划模式下同一轮提出 2 个动作时，底部条写着「当前有 1 项待执行操作」，点它却只会反复刷「当前没有待审批的操作，计划进度见下方计划卡片」（19:03:46–19:04:04 刷了 15+ 次），**本该出现的批量审批弹窗从未出现**，第二个动作永远停在「待确认」，输入区被锁死；同轮还提了「日志读取、扫描错误方便一点」。两条都已修复：队列条只说真话，计划模式的一键执行必定走得进审批闸门，日志面板能过滤错误并一键复制。完整改动清单、真机证据与披露见仓库根 `docs/DEVELOPMENT.md` §23.18。
+
+1. **队列条不再谎报**。`AiConsoleUiState.withQueueCount()` 只统计 `AWAITING_CONFIRM`（真的在等用户点确认的动作）；`PROPOSED` 是「本轮还没走到的排队项」，不再计入。原来把两者一起算，才出现「底部说有 1 项待办、其实没有任何闸门在等用户」。
+2. **点队列条不再只写一行日志**。`openQueue()` 在既没有 `batchSnapshot` 可以重开、也没有单动作 `confirm` 在屏上时，改记新串 `ai_console_log_queue_busy`——「当前动作还在执行，后面还有 %1$d 项排队；本轮执行到它们时会逐个请你确认」，如实说明状态。
+3. **状态语义分开**。`ai_console_status_proposed` 从「待确认」改为**「排队中」**（en `Queued`），与真正在等人的 `ai_console_status_awaiting`（「等待你的确认」）区分；底部条 `ai_console_queue_bar` 改为「有 %1$d 项操作等待你的确认」（en `%1$d actions are waiting for your confirmation`）。
+4. **执行过程可见**（`ui/viewmodel/AiConsoleViewModel.kt`）。动作进入 RUNNING 时记 `ai_console_log_running`（「正在执行：%1$s（最多 %2$d 秒）」）；命中 `AiErrorCode.TIMEOUT` 时记 `ai_console_log_timeout`。用户不必再从「没动静」猜是卡住还是正常。
+5. **日志面板可过滤、可复制**（`ui/component/aichat/AiChatMiuix.kt`、`AiChatMaterial.kt` 两个 flavour 同步）。展开后新增「只看错误」（筛 `DENIED` / `ERROR`，没有错误行时置灰不可点）与「复制日志」（复制 `HH:mm:ss 级别 消息` 全文，成功后标签变「已复制」约 4 秒）。新增字符串 `ai_console_log_errors_only`、`ai_console_log_all`、`ai_console_log_copy`、`ai_console_log_copied`（en + zh）。
+6. `ai_console_log_queue_hint` 在 Kotlin 侧已无调用点（串保留，便于回归比对）。
+7. **真机证据**。计划模式腿（2×`run_command ksud -h / ksud --help`，档位 STRICT）：卡片徽章 `排队中`=1；`当前有 1 项待执行操作`=0、`有 1 项操作等待你的确认`=0、`当前没有待审批的操作`=0（谎报与刷屏同时消失）；点「一键执行全部」→ 批量审批弹窗出现（`确认执行以下操作 / 共 2 项操作待执行 / 全选 / 全不选 / 确认执行操作 (2)`）→ 确认后 `已完成`=2、`执行中`=0。日志面板腿（双冒号坏块会话）：`只看错误`=1、`复制日志`=1；点「只看错误」后 `无法解析`=1 且 `侦察`/`静默` 归零，标签翻成「全部」；点「复制日志」后 `已复制`=1。
+
 ## 附录 A. 关键常量一览
 
 以下取值均来自仓库源码，改动时请同步本节。

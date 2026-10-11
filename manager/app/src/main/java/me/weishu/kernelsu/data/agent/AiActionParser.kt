@@ -1,38 +1,82 @@
 package me.weishu.kernelsu.data.agent
 
+import me.weishu.kernelsu.data.agent.tool.AiToolRegistry
 import me.weishu.kernelsu.data.modulemaker.ModuleDraft
 import me.weishu.kernelsu.data.modulemaker.ModuleDraftValidator
 import me.weishu.kernelsu.data.modulemaker.ModuleMakerFile
+import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * What one reply turned into, and how far the parser got.
+ *
+ * [jsonSeen] and [actionish] separate "the model answered in prose" (normal end of a turn) from
+ * "the model tried to hand us actions and we could not read them" — the second one must never be
+ * reported as the first, because that is exactly the dead end where the console says "no actions"
+ * while the user is looking at an empty card.
+ */
+data class AiParseResult(
+    val actions: List<AiAction>,
+    /** A balanced JSON block exists in the reply. Prose without any block is false. */
+    val jsonSeen: Boolean = false,
+    /** That block looks like an action payload (`action` / `actions` / `tool` key). */
+    val actionish: Boolean = false,
+    /** A block was found but no lenient reading of it produced usable JSON. */
+    val malformed: Boolean = false,
+)
 
 /**
  * Parses the action list out of a model reply.
  *
- * The reply may wrap its JSON in prose or a fenced block, so the first balanced JSON object wins.
- * Anything unparseable yields an empty list, and the caller then just shows the reply as text, which
- * is the safe outcome: no actions, nothing to gate.
+ * The reply may wrap its JSON in prose or a fenced block, so the first balanced JSON block wins.
+ * Several shapes are accepted, because real models do not stick to one: `{"actions":[…]}`,
+ * a bare top-level array, a single action object without a wrapper, and `tool`/`name` in place of
+ * `action`. Trailing commas and smart quotes are repaired before giving up. Anything left
+ * unparseable yields an empty list, and the caller then shows the reply as text, which is the safe
+ * outcome: no actions, nothing to gate.
  */
 object AiActionParser {
 
-    fun parse(text: String): List<AiAction> {
-        val body = extractObject(text) ?: return emptyList()
-        val root = try {
-            JSONObject(body)
-        } catch (t: Throwable) {
-            return emptyList()
+    fun parse(text: String): List<AiAction> = parseDetailed(text).actions
+
+    fun parseDetailed(text: String): AiParseResult {
+        val blocks = blocks(text)
+        if (blocks.isEmpty()) return AiParseResult(emptyList())
+        val actionish = blocks.any { looksActionish(it) }
+        var sawJson = false
+        for (src in blocks) {
+            val node = lenient(src) ?: continue
+            sawJson = true
+            val items = itemsOf(node)
+            if (items.isEmpty()) continue
+            val out = ArrayList<AiAction>(items.size)
+            for (item in items) out.add(fromJson(item))
+            if (out.isNotEmpty()) return AiParseResult(out, jsonSeen = true, actionish = actionish)
         }
-        val array = root.optJSONArray("actions") ?: return emptyList()
-        val out = ArrayList<AiAction>(array.length())
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            out.add(fromJson(item))
-        }
-        return out
+        // A block was there but nothing usable came out of it. Not the same as prose, and the
+        // console reports it as its own state instead of "the model proposed no action".
+        return AiParseResult(emptyList(), jsonSeen = true, actionish = actionish, malformed = !sawJson)
     }
 
     /** First balanced brace-delimited object in the text, or null. */
-    fun extractObject(text: String): String? {
-        val start = text.indexOf('{')
+    fun extractObject(text: String): String? = balanced(text, '{', '}')?.second
+
+    /** Every JSON block of the reply, ordered so the outermost one is read first. */
+    private fun blocks(text: String): List<String> {
+        val obj = balanced(text, '{', '}')
+        val arr = balanced(text, '[', ']')
+        return when {
+            obj != null && arr != null ->
+                if (arr.first < obj.first) listOf(arr.second, obj.second) else listOf(obj.second, arr.second)
+            obj != null -> listOf(obj.second)
+            arr != null -> listOf(arr.second)
+            else -> emptyList()
+        }
+    }
+
+    /** Offsets are only used to order the two candidates; the source is what callers read. */
+    private fun balanced(text: String, open: Char, close: Char): Pair<Int, String>? {
+        val start = text.indexOf(open)
         if (start < 0) return null
         var depth = 0
         var inString = false
@@ -49,14 +93,68 @@ object AiActionParser {
             }
             when (ch) {
                 '"' -> inString = true
-                '{' -> depth++
-                '}' -> {
+                open -> depth++
+                close -> {
                     depth--
-                    if (depth == 0) return text.substring(start, i + 1)
+                    if (depth == 0) return i to text.substring(start, i + 1)
                 }
             }
         }
         return null
+    }
+
+    /** `"action":`, `"actions":` or `"tool":` anywhere in the block: the model tried to act. */
+    private fun looksActionish(src: String): Boolean {
+        val lower = src.lowercase()
+        return ACTION_KEYS.any { lower.contains(it) }
+    }
+
+    private val ACTION_KEYS = listOf("\"action\"", "\"actions\"", "\"tool\"", "\"tool_name\"")
+
+    /**
+     * Reads one block, object or array, with one repair pass for the defects models actually emit
+     * (trailing commas, smart quotes, a stray BOM). Null when even that does not parse.
+     */
+    private fun lenient(src: String): Any? {
+        for (candidate in listOf(src, repair(src))) {
+            val body = candidate.trim()
+            if (body.isEmpty()) continue
+            val parsed = runCatching {
+                if (body.startsWith("[")) JSONArray(body) else JSONObject(body)
+            }.getOrNull()
+            if (parsed != null) return parsed
+        }
+        return null
+    }
+
+    private fun repair(src: String): String = src
+        .replace('\uFEFF', ' ')
+        .replace('\u201C', '"')
+        .replace('\u201D', '"')
+        .replace(Regex(",(\\s*[}\\]])"), "\$1")
+
+    /** The action objects inside a parsed block, in the shapes a model may have chosen. */
+    private fun itemsOf(node: Any): List<JSONObject> = when (node) {
+        is JSONArray -> (0 until node.length()).mapNotNull { node.optJSONObject(it) }
+        is JSONObject -> {
+            val array = node.optJSONArray("actions") ?: node.optJSONArray("action")
+            when {
+                array != null -> (0 until array.length()).mapNotNull { array.optJSONObject(it) }
+                node.opt("actions") is JSONObject -> listOfNotNull(node.optJSONObject("actions"))
+                node.optJSONObject("action") != null -> listOfNotNull(node.optJSONObject("action"))
+                // A single action without the wrapper. Only when it names something, so a reply
+                // that merely shows a JSON object is not turned into an action card.
+                namesAction(node) -> listOf(node)
+                else -> emptyList()
+            }
+        }
+        else -> emptyList()
+    }
+
+    private fun namesAction(item: JSONObject): Boolean {
+        if (text(item, "action").isNotBlank() || text(item, "tool").isNotBlank()) return true
+        val named = text(item, "name")
+        return named.isNotBlank() && AiToolRegistry.contains(AiToolRegistry.resolveAlias(named))
     }
 
     /** A line that is nothing but a code fence and/or a language label. */
@@ -86,7 +184,14 @@ object AiActionParser {
      * the rest of the reply keeps its shape. A reply with no object at all is returned trimmed.
      */
     fun stripActionBlock(text: String): String {
-        val obj = extractObject(text) ?: return text.trim()
+        val all = blocks(text)
+        // Cut the block the model actually meant: the first one that yields action objects. Stripping
+        // only the first `{` would leave the rest of a top-level array on the card as raw JSON.
+        val obj = all.firstOrNull { src ->
+            val node = lenient(src)
+            node != null && itemsOf(node).isNotEmpty()
+        } ?: all.firstOrNull()
+            ?: return text.trim()
         val start = text.indexOf(obj)
         val head = text.substring(0, start).split('\n').toMutableList()
         val tail = text.substring(start + obj.length).split('\n').toMutableList()
@@ -129,7 +234,7 @@ object AiActionParser {
     private fun fromJson(item: JSONObject): AiAction {
         val reason = text(item, "reason").ifBlank { null }
         val unknown = AiAction.Unknown(item.toString(), reason)
-        val verb = text(item, "action")
+        val verb = verbOf(item)
         return when (verb) {
             AiAction.READ_FILE -> {
                 val path = text(item, "path")
@@ -229,7 +334,49 @@ object AiActionParser {
                 }
             }
             AiAction.ROOT_APP_LIST -> AiAction.RootAppList(reason)
-            else -> unknown
+            else -> toolAction(verb, item, reason, unknown)
         }
     }
+
+    /**
+     * The action name, read from `action` or from the `tool` spelling a model reaches for when it is
+     * thinking in terms of function calls. A bare `name` is only trusted when the registry knows it,
+     * because `name` is also the module name of make_module.
+     */
+    private fun verbOf(item: JSONObject): String {
+        val direct = text(item, "action").ifBlank { text(item, "tool") }
+        if (direct.isNotBlank()) return AiToolRegistry.resolveAlias(direct)
+        val named = text(item, "name")
+        if (named.isBlank()) return ""
+        val resolved = AiToolRegistry.resolveAlias(named)
+        return if (AiToolRegistry.contains(resolved)) resolved else ""
+    }
+
+    /**
+     * A registered structured tool. Anything the registry does not know stays Unknown, so it is shown
+     * to the user and gated STRICT instead of being dropped or guessed at.
+     */
+    private fun toolAction(verb: String, item: JSONObject, reason: String?, unknown: AiAction): AiAction {
+        if (!AiToolRegistry.contains(verb)) return unknown
+        return AiAction.Tool(toolName = verb, args = argsFromJson(item), reason = reason)
+    }
+
+    /** Declared parameters arrive raw; the validator coerces and rejects them at the gate. */
+    private fun argsFromJson(item: JSONObject): Map<String, Any?> {
+        val out = LinkedHashMap<String, Any?>()
+        val keys = item.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            // Envelope bookkeeping, not a tool parameter: the validator refuses unknown parameters,
+            // so a model that adds "summary" next to its action would otherwise get its own tool
+            // call blocked as a validation failure.
+            if (key in NON_ARG_KEYS) continue
+            val value = item.opt(key)
+            if (value == null || value == JSONObject.NULL) continue
+            out[key] = value
+        }
+        return out
+    }
+
+    private val NON_ARG_KEYS = setOf("action", "actions", "tool", "tool_name", "reason", "summary")
 }

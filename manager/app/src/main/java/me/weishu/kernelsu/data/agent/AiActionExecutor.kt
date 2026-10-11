@@ -7,6 +7,14 @@ import me.weishu.kernelsu.data.repository.AiAuditRepository
 import me.weishu.kernelsu.data.repository.AiSettingsRepository
 import me.weishu.kernelsu.data.modulemaker.ModuleDraftValidator
 import me.weishu.kernelsu.data.modulemaker.ModuleMaker
+import me.weishu.kernelsu.data.agent.tool.AiShellIo
+import me.weishu.kernelsu.data.agent.tool.AiToolContext
+import me.weishu.kernelsu.data.agent.tool.AiToolDispatch
+import me.weishu.kernelsu.data.agent.tool.AiToolRegistry
+import me.weishu.kernelsu.data.agent.tool.AiToolValidation
+import me.weishu.kernelsu.data.agent.tool.AiToolValidator
+import me.weishu.kernelsu.data.agent.tool.toolBlocked
+import me.weishu.kernelsu.data.agent.tool.toolFailed
 import me.weishu.kernelsu.ksuApp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -14,11 +22,98 @@ import me.weishu.kernelsu.ui.util.execKsud
 import me.weishu.kernelsu.ui.util.getRootShell
 import me.weishu.kernelsu.ui.util.toggleModule
 
+/**
+ * Machine-readable state of one result.
+ *
+ * [wire] is the literal the model reads in the JSON envelope. A `blocked` step was refused before it
+ * ran (scope, shell switch, validation, risk tier), a `cancelled` one was declined by the user, and a
+ * `failed` one really ran and failed — the model has to tell those apart, which is what stops a
+ * refusal from being reported as "there is no such tool". See design/ai-tool-api.md section 2.3.
+ */
+enum class AiOutcomeStatus(val wire: String) {
+    OK("ok"),
+    FAILED("failed"),
+    BLOCKED("blocked"),
+    CANCELLED("cancelled"),
+    SKIPPED("skipped"),
+    ;
+
+    companion object {
+        fun of(ok: Boolean): AiOutcomeStatus = if (ok) OK else FAILED
+    }
+}
+
+/** Stable `error` codes: the model branches on these instead of parsing prose. */
+object AiErrorCode {
+    const val SECURITY_DENIED = "security_denied"
+    const val SCOPE_TOO_NARROW = "scope_too_narrow"
+    const val FILE_ACCESS_DISABLED = "file_access_disabled"
+    const val PATH_OUTSIDE_SCOPE = "path_outside_scope"
+    const val SHELL_DISABLED = "shell_disabled"
+    const val INVALID_REQUEST = "invalid_request"
+    const val VALIDATION_FAILED = "validation_failed"
+    const val UNKNOWN_TOOL = "unknown_tool"
+    const val UNKNOWN_ACTION = "unknown_action"
+    const val EXECUTION_FAILED = "execution_failed"
+    /** The action was abandoned by the console after its deadline; it may still run in the background. */
+    const val TIMEOUT = "timeout"
+    const val USER_DECLINED = "user_declined"
+    const val PLAN_PAUSED = "plan_paused"
+}
+
+/**
+ * The one JSON envelope every result carries back to the model (design/ai-tool-api.md section 2.3).
+ *
+ * [status] and [blocked] exist because "I am not allowed to do this" and "this ran and failed" call
+ * for opposite reactions: the first one is reported to the user as a refusal with the switch that
+ * would lift it, the second one as a failure to work around. [message] always holds a sentence in the
+ * user's language, so a failure is never a bare code.
+ */
+fun aiResultJson(
+    tool: String,
+    ok: Boolean,
+    status: AiOutcomeStatus = AiOutcomeStatus.of(ok),
+    error: String? = null,
+    message: String? = null,
+    data: Any? = null,
+): String {
+    val json = JSONObject()
+    json.put("ok", ok)
+    json.put("tool", tool)
+    json.put("status", status.wire)
+    json.put("blocked", status == AiOutcomeStatus.BLOCKED || status == AiOutcomeStatus.CANCELLED)
+    json.put("data", data ?: JSONObject.NULL)
+    json.put("error", error ?: JSONObject.NULL)
+    if (!message.isNullOrBlank()) json.put("message", message)
+    return json.toString()
+}
+
 /** What one action actually did. [output] is shown in the terminal card and fed back to the model. */
 data class AiExecutionOutcome(
     val ok: Boolean,
     val output: String,
     val undoable: Boolean = false,
+    /**
+     * Machine-readable state. Structured tools already carry it inside [output]; the console writes
+     * the same envelope for every step that never reached a handler (refused, cancelled, skipped) and
+     * for the hand-built actions, so no result is ever prose only.
+     */
+    val status: AiOutcomeStatus = AiOutcomeStatus.of(ok),
+    val error: String? = null,
+    /** Natural-language explanation of [error], written so that a person can read it. */
+    val message: String? = null,
+)
+
+/** A refusal that never ran: the request itself is invalid, not the device. */
+internal fun refusedOutcome(
+    text: String,
+    error: String = AiErrorCode.INVALID_REQUEST,
+): AiExecutionOutcome = AiExecutionOutcome(
+    ok = false,
+    output = text,
+    status = AiOutcomeStatus.BLOCKED,
+    error = error,
+    message = text,
 )
 
 /**
@@ -30,6 +125,16 @@ data class AiExecutionOutcome(
  */
 interface AiActionExecutor {
     suspend fun execute(action: AiAction, scope: AiAccessScope): AiExecutionOutcome
+
+    /**
+     * Runs [block] with every audit entry it writes stamped with [batchId].
+     *
+     * The console confirms several actions at once, and the audit page has to be able to show that
+     * batch as one row and reverse it with a single tap, which is only possible when the entries
+     * written by that round carry a shared id. A null [batchId] means the entry belongs to no batch
+     * and stays a single row. The previous stamp is restored even when [block] throws.
+     */
+    suspend fun <T> withBatch(batchId: String?, block: suspend () -> T): T
 }
 
 class AiActionExecutorImpl(
@@ -38,6 +143,31 @@ class AiActionExecutorImpl(
         me.weishu.kernelsu.data.repository.SuperUserRepositoryImpl(),
     private val settings: AiSettingsRepository = me.weishu.kernelsu.data.repository.AiSettingsRepositoryImpl(),
 ) : AiActionExecutor {
+
+    /**
+     * Batch stamp for audit entries written while [withBatch] runs. The console executes one round at
+     * a time on a single coroutine, so a plain field is enough; entries written outside a batch keep
+     * a null id and stay single rows on the audit page.
+     */
+    private var batchId: String? = null
+
+    override suspend fun <T> withBatch(batchId: String?, block: suspend () -> T): T {
+        val previous = this.batchId
+        this.batchId = batchId
+        return try {
+            block()
+        } finally {
+            // Only take the stamp back down if it is still ours. An action the console abandoned on
+            // timeout may finish later, while another round already holds the field; restoring
+            // blindly would stamp the live round's entries with a finished batch id.
+            if (this.batchId == batchId) this.batchId = previous
+        }
+    }
+
+    /** The only way this class writes history, so no entry can miss the current batch stamp. */
+    private suspend fun record(entry: AiAuditEntry) {
+        audit.append(entry.copy(batchId = batchId))
+    }
 
     companion object {
         const val TRASH_ROOT = "/data/adb/.ai_trash"
@@ -56,6 +186,15 @@ class AiActionExecutorImpl(
 
         /** Files above this are never loaded as text at all; the model must search and window them. */
         const val MAX_TEXT_FILE_BYTES = 2L * 1024L * 1024L
+
+        /**
+         * Hard ceiling on one whole-file read. The user configurable whole-read threshold is a *file
+         * size* limit, and at its default (2 MB) the text alone overflows the model window and comes
+         * back as HTTP 400; one read may never hand the model more than the largest chunk the settings
+         * screen can also ask for (AiReadLimits.MAX_CHUNK). The existing truncation trailer tells the
+         * model to continue from a start_line, so a cut here is visible rather than silent.
+         */
+        const val MAX_WHOLE_READ_CHARS = 256_000
 
         /** Bytes sniffed before a file is called binary. */
         const val BINARY_PROBE_BYTES = 512
@@ -108,7 +247,8 @@ class AiActionExecutorImpl(
                 is AiAction.InstallModule -> installModule(action.path)
                 is AiAction.MakeModule -> makeModule(action)
                 is AiAction.MoveToTrash -> moveToTrash(action.path)
-                is AiAction.Unknown -> AiExecutionOutcome(false, "无法识别的动作，已拒绝执行")
+                is AiAction.Tool -> runTool(action, scope)
+                is AiAction.Unknown -> refusedOutcome("无法识别的动作，已拒绝执行", AiErrorCode.UNKNOWN_ACTION)
             }
         }
 
@@ -124,10 +264,10 @@ class AiActionExecutorImpl(
         maxChars: Int?,
         whole: Boolean,
     ): AiExecutionOutcome {
-        val quoted = quote(path) ?: return AiExecutionOutcome(false, "路径包含非法字符，已拒绝")
+        val quoted = quote(path) ?: return refusedOutcome("路径包含非法字符，已拒绝")
         val meta = probe(path, quoted)
-        if (meta.isDirectory) return AiExecutionOutcome(false, "这是一个目录，请改用 list_dir：" + path)
-        if (meta.binary) return AiExecutionOutcome(false, binaryRefusal(path))
+        if (meta.isDirectory) return refusedOutcome("这是一个目录，请改用 list_dir：" + path)
+        if (meta.binary) return refusedOutcome(binaryRefusal(path), AiErrorCode.SECURITY_DENIED)
         if (meta.bytes > MAX_TEXT_FILE_BYTES) {
             return AiExecutionOutcome(
                 false,
@@ -145,7 +285,7 @@ class AiActionExecutorImpl(
         val totalLines = all.size
         val limit = settings.readChunkLimit.coerceAtLeast(MIN_READ_LIMIT)
         val unlimited = whole && meta.bytes <= settings.fullReadThresholdKb.toLong() * 1024L
-        val charCap = if (unlimited) Int.MAX_VALUE else minOf(maxChars ?: limit, limit).coerceAtLeast(200)
+        val charCap = if (unlimited) MAX_WHOLE_READ_CHARS else minOf(maxChars ?: limit, limit).coerceAtLeast(200)
         val from = (startLine - 1).coerceIn(0, maxOf(0, totalLines - 1))
         val takeLines = maxLines ?: AiAction.MAX_CHUNK_LINES
         var body = all.drop(from).take(takeLines).joinToString(10.toChar().toString())
@@ -169,11 +309,11 @@ class AiActionExecutorImpl(
 
     /** Literal, line numbered search; answers with line numbers so the next read can be a window. */
     private suspend fun searchInFile(path: String, pattern: String): AiExecutionOutcome {
-        val quoted = quote(path) ?: return AiExecutionOutcome(false, "路径包含非法字符，已拒绝")
+        val quoted = quote(path) ?: return refusedOutcome("路径包含非法字符，已拒绝")
         val meta = probe(path, quoted)
-        if (meta.isDirectory) return AiExecutionOutcome(false, "这是一个目录，请改用 list_dir：" + path)
-        if (meta.binary) return AiExecutionOutcome(false, binaryRefusal(path))
-        val needle = quote(pattern) ?: return AiExecutionOutcome(false, "搜索词包含非法字符，已拒绝")
+        if (meta.isDirectory) return refusedOutcome("这是一个目录，请改用 list_dir：" + path)
+        if (meta.binary) return refusedOutcome(binaryRefusal(path), AiErrorCode.SECURITY_DENIED)
+        val needle = quote(pattern) ?: return refusedOutcome("搜索词包含非法字符，已拒绝")
         val io = shell("grep -n -F -- " + needle + " " + quoted)
         if (io.code == 1) {
             return AiExecutionOutcome(true, "未找到匹配「" + pattern + "」（文件共 " + kb(meta.bytes) + " KB）")
@@ -218,7 +358,7 @@ class AiActionExecutorImpl(
 
     /** Metadata as JSON: the model gets numbers it can plan with instead of guessing file sizes. */
     private suspend fun fileMetadata(path: String): AiExecutionOutcome {
-        val quoted = quote(path) ?: return AiExecutionOutcome(false, "路径包含非法字符，已拒绝")
+        val quoted = quote(path) ?: return refusedOutcome("路径包含非法字符，已拒绝")
         val meta = probe(path, quoted)
         val exists = meta.bytes >= 0 || meta.isDirectory
         if (!exists) return AiExecutionOutcome(false, "无法读取文件信息（可能不存在）：" + path)
@@ -241,7 +381,7 @@ class AiActionExecutorImpl(
     }
 
     private suspend fun listDir(path: String): AiExecutionOutcome {
-        val quoted = quote(path) ?: return AiExecutionOutcome(false, "路径包含非法字符，已拒绝")
+        val quoted = quote(path) ?: return refusedOutcome("路径包含非法字符，已拒绝")
         val io = shell("ls -la " + quoted)
         if (io.code != 0) {
             return AiExecutionOutcome(false, cap(io.err.ifBlank { io.out }.ifBlank { "(无输出)" }))
@@ -267,7 +407,7 @@ class AiActionExecutorImpl(
     }
 
     private suspend fun runCommandAction(command: String, scope: AiAccessScope): AiExecutionOutcome {
-        shellBinaryGuard(command)?.let { return AiExecutionOutcome(false, it) }
+        shellBinaryGuard(command)?.let { return refusedOutcome(it, AiErrorCode.SECURITY_DENIED) }
         val io = shell(command)
         val body = buildString {
             if (io.out.isNotBlank()) appendLine(io.out)
@@ -276,7 +416,7 @@ class AiActionExecutorImpl(
         }.trim()
         val ok = io.code == 0
         if (scope != AiAccessScope.NONE) {
-            audit.append(
+            record(
                 AiAuditEntry(
                     ts = System.currentTimeMillis(),
                     kind = KIND_COMMAND,
@@ -294,7 +434,7 @@ class AiActionExecutorImpl(
      * confirmed it; toybox timeout keeps a command that starts streaming from hanging the console.
      */
     private suspend fun safeExec(command: String, timeoutSeconds: Int): AiExecutionOutcome {
-        shellBinaryGuard(command)?.let { return AiExecutionOutcome(false, it) }
+        shellBinaryGuard(command)?.let { return refusedOutcome(it, AiErrorCode.SECURITY_DENIED) }
         val io = shell("timeout " + timeoutSeconds + " " + command)
         if (io.code == TIMEOUT_EXIT_CODE) {
             return AiExecutionOutcome(false, "命令超过 " + timeoutSeconds + " 秒仍未结束，已被终止")
@@ -305,7 +445,7 @@ class AiActionExecutorImpl(
             if (isEmpty()) appendLine("(无输出)")
         }.trim()
         val ok = io.code == 0
-        audit.append(
+        record(
             AiAuditEntry(
                 ts = System.currentTimeMillis(),
                 kind = KIND_SAFE_EXEC,
@@ -348,17 +488,17 @@ class AiActionExecutorImpl(
     }
 
     private suspend fun setSu(packageName: String, allow: Boolean): AiExecutionOutcome {
-        val uid = packageUid(packageName)
+        val uid = packageUid(packageName) ?: shellUidOf(packageName)
             ?: return AiExecutionOutcome(false, "找不到应用 " + packageName)
         if (uid < 2000 && uid != 1000) {
-            return AiExecutionOutcome(false, "系统应用（uid " + uid + "）不允许通过助手授权")
+            return refusedOutcome("系统应用（uid " + uid + "）不允许通过助手授权", AiErrorCode.SECURITY_DENIED)
         }
         val before = runCatching { Natives.getAppProfile(packageName, uid) }.getOrNull()
             ?: return AiExecutionOutcome(false, "读取不到 " + packageName + " 的授权配置")
         val updated = before.copy(allowSu = allow)
         val ok = runCatching { Natives.setAppProfile(updated) }.getOrDefault(false)
         if (ok) {
-            audit.append(
+            record(
                 AiAuditEntry(
                     ts = System.currentTimeMillis(),
                     kind = KIND_SU,
@@ -381,7 +521,7 @@ class AiActionExecutorImpl(
     private suspend fun setModule(id: String, enable: Boolean): AiExecutionOutcome {
         val ok = runCatching { toggleModule(id, enable) }.getOrDefault(false)
         if (ok) {
-            audit.append(
+            record(
                 AiAuditEntry(
                     ts = System.currentTimeMillis(),
                     kind = KIND_MODULE,
@@ -402,9 +542,9 @@ class AiActionExecutorImpl(
     }
 
     private suspend fun installModule(path: String): AiExecutionOutcome {
-        val quoted = quote(path) ?: return AiExecutionOutcome(false, "路径包含非法字符，已拒绝")
+        val quoted = quote(path) ?: return refusedOutcome("路径包含非法字符，已拒绝")
         val ok = runCatching { execKsud("module install " + quoted, true) }.getOrDefault(false)
-        audit.append(
+        record(
             AiAuditEntry(
                 ts = System.currentTimeMillis(),
                 kind = KIND_INSTALL,
@@ -428,7 +568,7 @@ class AiActionExecutorImpl(
             return AiExecutionOutcome(false, ModuleMaker.describeErrors(errors))
         }
         val result = ModuleMaker.buildAndInstall(draft, action.install)
-        audit.append(
+        record(
             AiAuditEntry(
                 ts = System.currentTimeMillis(),
                 kind = KIND_MAKE_MODULE,
@@ -450,7 +590,7 @@ class AiActionExecutorImpl(
     }
 
     private suspend fun moveToTrash(path: String): AiExecutionOutcome {
-        val source = quote(path) ?: return AiExecutionOutcome(false, "路径包含非法字符，已拒绝")
+        val source = quote(path) ?: return refusedOutcome("路径包含非法字符，已拒绝")
         val stamp = System.currentTimeMillis().toString()
         val name = path.trimEnd('/').substringAfterLast('/').ifBlank { "unnamed" }
         val dir = TRASH_ROOT + "/" + stamp
@@ -458,7 +598,7 @@ class AiActionExecutorImpl(
         val io = shell("mkdir -p '" + dir + "' && mv " + source + " '" + target + "'")
         val ok = io.code == 0
         if (ok) {
-            audit.append(
+            record(
                 AiAuditEntry(
                     ts = System.currentTimeMillis(),
                     kind = KIND_TRASH,
@@ -474,9 +614,72 @@ class AiActionExecutorImpl(
         return AiExecutionOutcome(ok, text, undoable = ok)
     }
 
+    /**
+     * One structured tool call. Validation runs again here even though the guard already did it: the
+     * executor must not be safe only because of the order it happens to be called in. The context it
+     * hands the handler carries the granted scope, the shell switch and the audit sink, so a handler
+     * has no way to reach past them.
+     */
+    private suspend fun runTool(action: AiAction.Tool, scope: AiAccessScope): AiExecutionOutcome {
+        val spec = AiToolRegistry.byName(action.toolName)
+            ?: return toolFailed(
+                action.toolName,
+                AiErrorCode.UNKNOWN_TOOL,
+                "本机没有名为「" + action.toolName + "」的工具，请只使用清单里列出的工具。",
+            )
+        val allowShell = runCatching { settings.allowShell }.getOrDefault(true)
+        val validation = AiToolValidator.validate(spec, action.args, scope, allowShell)
+        if (validation is AiToolValidation.Invalid) {
+            // The guard refuses this first in practice; reaching here means the two checks disagree, and
+            // either way the model is told it was blocked instead of being handed bare prose.
+            return toolBlocked(
+                action.toolName,
+                AiErrorCode.VALIDATION_FAILED,
+                "参数校验失败：" + validation.reason,
+            )
+        }
+        val args = (validation as AiToolValidation.Ok).args
+        val context = AiToolContext(
+            scope = scope,
+            allowShell = allowShell,
+            batchSize = 1,
+            shellRunner = { command ->
+                val io = shell(command)
+                AiShellIo(io.code, io.out, io.err)
+            },
+            quoteFn = { value -> quote(value) },
+            uidFn = { name -> packageUid(name) },
+            auditSink = { entry -> record(entry) },
+        )
+        val outcome = AiToolDispatch.run(spec.name, args, context)
+        return if (outcome.output.length <= MAX_OUTPUT) {
+            outcome
+        } else {
+            // copy(), not a fresh outcome: rebuilding it here used to drop status/error/message and a
+            // truncated failure fell back to being a bare sentence the model could reinterpret.
+            outcome.copy(output = cap(outcome.output))
+        }
+    }
+
     private fun packageUid(packageName: String): Int? = runCatching {
         ksuApp.packageManager.getPackageInfo(packageName, 0)?.applicationInfo?.uid
     }.getOrNull()
+
+    /**
+     * uid fallback for the apps PackageManager refuses to answer for.
+     *
+     * Android 11+ package visibility hides every package this manager may not see, but
+     * `cmd package list packages` runs as root and sees them all, so grant/revoke on a freshly
+     * installed app still resolves. The first uid of a multi-user line is the current user's.
+     */
+    private fun shellUidOf(packageName: String): Int? {
+        val quoted = quote(packageName) ?: return null
+        val line = shell("cmd package list packages -U $quoted").out
+            .lineSequence()
+            .firstOrNull { it.startsWith("package:") }
+            ?: return null
+        return line.substringAfter("uid:", "").substringBefore(',').trim().toIntOrNull()
+    }
 
     /** Single quoted argument; null when the path cannot be quoted safely. */
     private fun quote(value: String): String? {
