@@ -19,6 +19,8 @@
       * ksud module list 的 JSON 里 enabled/update 等字段是**字符串** "true"/"false"，不是布尔。
       * 运行模式三态：Lkm / GkiBuiltIn / Unknown；Unknown 时模式过滤必须是 no-op（fail-closed）。
       * 绝不打印 keybox.xml 的内容（含明文 EC 私钥）：只报存在性、字节数与 sha256 前 8 位。
+      * PathMask 作用域（/data/adb/pathmask/scope_mode.conf）只读第一行：global 表示模块不查应用名单
+        （作者 WebUI 原文），被遮路径对每个 App 都消失 ⇒ 全机环境异常，必须报出来而不是静默。
 
 .PARAMETER Serial
     目标设备序列号。省略时：恰好一台 device 态设备就用它；0 台或多台都明确报错并退出非 0。
@@ -262,6 +264,21 @@ if ($kbRes.ExitCode -ne 0) {
     if ($null -eq $kbPresent) { $kbPresent = $false }
 }
 
+# PathMask 作用域：模块的持久配置跨重装存活、每次开机被重申（service.sh 的 seed_config_file 只在文件
+# 缺失时才写默认值）。global 模式下模块不查应用名单 ⇒ 被遮路径对**每个** App 都消失。只读第一行；
+# 文件不存在一律 Unknown（pathmask 没装时这是唯一诚实答案，绝不塌成 deny）。
+$pmScopePath = '/data/adb/pathmask/scope_mode.conf'
+$pmScopeRes = Invoke-SuShell -Adb $adb -Serial $serial -Command ("if test -s " + $pmScopePath + "; then head -n 1 " + $pmScopePath + "; else echo PATHMASK_SCOPE_ABSENT; fi")
+$pmScope = @{ State = 'Unknown'; Raw = ''; Why = '' }
+if ($pmScopeRes.ExitCode -ne 0) {
+    $pmScope = @{ State = 'Unknown'; Raw = ''; Why = ('su 不可用（退出码 ' + $pmScopeRes.ExitCode + '）：作用域未知，不猜') }
+} else {
+    $pmScope = Get-PathMaskScopeFromLines -Lines @($pmScopeRes.Output)
+}
+if ([string]$pmScope.State -ceq 'Global') {
+    Add-Note 'PathMask 作用域是 global：模块不查应用名单，被遮路径对本机**每个** App 都消失 —— 只要 target_path 里有一条真实存在的路径（真机 /system_ext/app/SoterService 就是），就是全机环境异常。用 _tools\hiding-onekey.ps1 -Apply -PathMaskScope -SkipModules 修回 deny/allow。'
+}
+
 # 已安装包集合（检测器判定用）。
 $pmRes = Invoke-AdbShell -Adb $adb -Serial $serial -Command 'pm list packages'
 $pkgList = @()
@@ -347,6 +364,13 @@ $report = [ordered]@{
         sha256Prefix = $kbSha8
         note         = '只读：只报存在性/字节数/sha256 前 8 位；内容（含明文 EC 私钥）绝不显示'
     }
+    pathMaskScope = [ordered]@{
+        path  = $pmScopePath
+        state = [string]$pmScope.State
+        raw   = [string]$pmScope.Raw
+        why   = [string]$pmScope.Why
+        note  = '只读第一行；Global = 模块不查应用名单（作者 WebUI 原文），会造成全机环境异常'
+    }
     detectors   = [ordered]@{
         available      = $pmAvailable
         packageTotal   = @($pkgList).Count
@@ -424,6 +448,15 @@ elseif ($kbPresent -eq $false) { $kbDisp = 'False' }
 Say ("存在（test -s）: " + $kbDisp)
 Say ("字节数       : " + $(if ($null -eq $kbSize) { '（未取到）' } else { $kbSize }))
 Say ("sha256 前 8  : " + $(if ($null -eq $kbSha8) { '（未取到）' } else { $kbSha8 }))
+
+Say ""
+Say "=== PathMask 作用域（只读） ==="
+Say ("路径         : " + $pmScopePath)
+Say ("取值         : " + $(if ([string]$pmScope.Raw -eq '') { '（未取到）' } else { [string]$pmScope.Raw }))
+$scopeMark = ''
+if ([string]$pmScope.State -ceq 'Global') { $scopeMark = '   <<< 环境异常风险：模块不查应用名单，每个 App 都看不到被遮路径' }
+Say ("判定         : " + [string]$pmScope.State + $scopeMark)
+Say ("说明         : " + [string]$pmScope.Why)
 
 Say ""
 Say "=== 检测器（pm list packages） ==="

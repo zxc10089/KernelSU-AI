@@ -547,6 +547,22 @@ private fun HidingPackColumnMaterial(uiState: HideEnvironmentUiState, actions: H
                     )
                 }
             }
+            // A `global` PathMask masks its target paths for every app, not just the listed ones, so a
+            // target that really exists turns into a device-wide anomaly. That state lives in
+            // /data/adb/pathmask and survives reinstalls (the module only seeds a missing file), so the
+            // app reports it here and never pretends the row is fine.
+            if (uiState.packState == HidingPackState.Ready &&
+                uiState.pathMaskScope == PathMaskScope.Global
+            ) {
+                add {
+                    SegmentedListItem(
+                        headlineContent = {
+                            Text(stringResource(id = R.string.hide_environment_pathmask_scope_global))
+                        },
+                        leadingContent = { Icon(Icons.Filled.Warning, null) }
+                    )
+                }
+            }
             when (uiState.packState) {
                 HidingPackState.Loading -> Unit
                 HidingPackState.Unavailable -> add {
@@ -987,8 +1003,8 @@ private fun CleanupColumnMaterial(uiState: HideEnvironmentUiState, actions: Hide
                     Text(stringResource(id = R.string.hide_environment_cleanup_local_note))
                 },
                 leadingContent = { Icon(Icons.Filled.Info, null) },
-                // 路径清单是只读探测的结果，随时可能不同于管线执行那一刻：按钮保持禁用，
-                // 清痕只由隐藏管道执行，App 不伪造成交。
+                // 路径清单是只读探测的结果，随时可能不同于管线执行那一刻：先弹确认框，确认后由
+                // ViewModel 统一提示「清理由隐藏管道执行」，App 不伪造成交。与 Miuix 主题同源。
                 onClick = { showConfirm.value = true },
             )
         }

@@ -95,6 +95,22 @@ data class SusfsProbe(
 )
 
 /**
+ * PathMask's effective scope, as the kernel received it.
+ *
+ * [Global] means the module does not consult the app list at all — its own WebUI says: "Global mode:
+ * every app loses sight of the hidden paths; the app list is not consulted." When a masked target
+ * really exists (this device masks the vendor `/system_ext/app/SoterService`), the whole device
+ * starts behaving abnormally, so the page has to say it out loud instead of showing a calm row.
+ *
+ * [Unknown] is the honest answer when nothing could be read; it must never collapse into [Scoped].
+ */
+enum class PathMaskScope {
+    Unknown,
+    Scoped,
+    Global,
+}
+
+/**
  * Outcome of one property-laundering row. [Unknown] means the probe could not answer;
  * [Pending] means the probe did answer and the target value is not in place yet (the property
  * is absent, or the device still holds its original value). [Applied] is reserved for rows
@@ -167,6 +183,12 @@ data class HideEnvironmentUiState(
     val recommendedIds: Set<String> = emptySet(),
     /** Tri-state kernel mode the pack is filtered against; [HidingRuntimeMode.Unknown] filters nothing. */
     val runtimeMode: HidingRuntimeMode = HidingRuntimeMode.Unknown,
+
+    /**
+     * Scope the installed PathMask really runs with, read from its own persistent state (never
+     * written from here). Drives the device-wide anomaly warning on the pack card.
+     */
+    val pathMaskScope: PathMaskScope = PathMaskScope.Unknown,
 
     // One-tap hide
     val isOneKeyRunning: Boolean = false,

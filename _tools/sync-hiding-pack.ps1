@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     把「隐藏环境资源包」打包进 Manager 的 assets，并生成 manifest.json。
 

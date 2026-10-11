@@ -326,6 +326,7 @@
 <string name="hide_environment_pack_reboot_hint">重启后生效</string>
 <string name="hide_environment_pack_scope_modules">功能模块</string>
 <string name="hide_environment_pack_scope_pathmask">内核路径遮罩</string>
+<string name="hide_environment_pathmask_scope_global">PathMask 作用域为 global：模块不查应用名单，本机每个 App 都看不到被遮路径，会造成环境异常。请在 PathMask 的 WebUI 里把作用域改回 deny/allow。</string>
 <string name="hide_environment_pack_scope_detectors">检测验证</string>
 <string name="hide_environment_pack_scope_data">数据配置</string>
 <string name="hide_environment_install_failed">错误：%s</string>

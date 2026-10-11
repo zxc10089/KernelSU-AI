@@ -890,6 +890,123 @@ function Get-TargetListPlan {
     $steps
 }
 
+function Get-PathMaskScopeFromLines {
+    <#
+    .SYNOPSIS
+        PathMask 作用域判定的**纯函数**版本（无 IO、无副作用）：把探针输出行折成三态。
+    .DESCRIPTION
+        /data/adb/pathmask/scope_mode.conf 只有三个有意义取值：
+          * deny / allow ⇒ Scoped：模块查应用名单，只对名单里的 App 掩蔽（模块出厂默认 deny）。
+          * global       ⇒ Global：模块自带 WebUI 原文 `Global mode: every app loses sight of the
+            hidden paths; the app list is not consulted.` ⇒ 被遮路径对**每个** App 都消失；
+            target_path 里只要有一条真实存在的路径（真机 /system_ext/app/SoterService 真实存在），
+            就是全机环境异常。
+          * 其它 / 文件缺失 / su 不可用 ⇒ Unknown：只能答「不知道」，**绝不回落成 deny**
+            （那等于把「没探测到」说成「安全」，与 SUSFS 探针同一条纪律）。
+        ABSENT 哨兵由调用方发（探针在文件缺失时回显它），这里只认字面量。
+    .OUTPUTS
+        @{ State = 'Scoped'|'Global'|'Unknown'; Raw = <原始取值或空>; Why = <说明> }
+    #>
+    param([string[]]$Lines = @())
+    $raw = ''
+    $sawAbsent = $false
+    foreach ($l in @($Lines)) {
+        $t = ([string]$l).Trim()
+        if ($t -eq '') { continue }
+        if ($t -ceq 'PATHMASK_SCOPE_ABSENT') { $sawAbsent = $true; continue }
+        $raw = $t
+    }
+    if ($raw -ceq '') {
+        $why = '探针没有回显任何取值'
+        if ($sawAbsent) { $why = 'scope_mode.conf 不存在或为空（pathmask 未安装或未播种配置）' }
+        return @{ State = 'Unknown'; Raw = ''; Why = $why }
+    }
+    if ($raw -ceq 'global') {
+        return @{ State = 'Global'; Raw = $raw; Why = 'global：模块不查应用名单，被遮路径对本机每个 App 都消失' }
+    }
+    if ($raw -ceq 'deny' -or $raw -ceq 'allow') {
+        return @{ State = 'Scoped'; Raw = $raw; Why = ($raw + '：模块查应用名单，只对名单里的 App 掩蔽（模块出厂默认）') }
+    }
+    return @{ State = 'Unknown'; Raw = $raw; Why = '无法识别的取值（只认 deny / allow / global）' }
+}
+
+function Get-PathMaskScopePlan {
+    <#
+    .SYNOPSIS
+        PathMask 作用域治理计划（纯构造器，无副作用）：把模块的持久配置改回「只对名单里的 App 掩蔽」。
+    .DESCRIPTION
+        **为什么必须由流水线写**：PathMask 的 service.sh 用 seed_config_file **只在文件缺失/为空时**才写
+        默认值（模块内置默认 scope_mode=deny），之后完全信任 /data/adb/pathmask/*.conf。这些文件跨重装存活、
+        每次开机被重申，而 `ksud module install` 与本项目 App 内的一键计划都只装模块、从不碰这些配置 ⇒
+        一条被改坏的作用域（例如 global）会被本项目**反复重申**。
+        模块自带 WebUI 对 global 的原文定义：`Global mode: every app loses sight of the hidden paths;
+        the app list is not consulted.` —— global 下被遮路径对**每个** App 都消失；目标里只要有一条真实
+        存在的路径（真机 /system_ext/app/SoterService 真实存在），就是全机环境异常。
+        **只写五个键，值全部取模块出厂默认（不发明新值）**：
+          * scope_mode.conf         = deny         （只有 deny/allow 才查应用名单）
+          * deny_packages.conf      = 出厂 4 个 ∪ 传入的检测器包名（去重排序）
+          * write_op_policy.conf    = passthrough  （eacces 会把本该透传的写操作变成权限错误）
+          * procguard.conf          = 0            （模块自述「开关默认关闭，由你决定是否启用」）
+          * auto_scene_debugfs.conf = 0            （开启后 600 s 后台窗去等一个不存在的 debugfs 挂载）
+        **不写 target_path.conf**：那是用户自己的掩蔽目标，替用户决定遮什么是越权。
+        包名先校验（fail-closed）：只接受 ^[A-Za-z0-9._]+$ 的非空串，否则立刻 throw —— 这些名字会被拼进
+        shell 命令，放行等于给命令注入开口子。deny 名单为空同样 throw（空名单在 deny 模式下会让模块跳过加载）。
+    .OUTPUTS
+        步骤数组，每项 @{Stage;Name;Command;Why}，Stage 恒为 'S10'。逐个输出（同 Get-TargetListPlan：
+        调用方必须用 @(...) 快照）。
+    #>
+    param(
+        [string]$TargetDir = '/data/adb/pathmask',
+        [string]$BackupDir = '/data/adb/pathmask-conf-backup',
+        [string[]]$ExtraDenyPackages = @()
+    )
+    $FactoryDeny = @('com.chunqiunativecheck', 'com.eltavine.duckdetector', 'luna.safe.luna', 'me.garfieldhan.holmes')
+    $deny = @(@($FactoryDeny) + @($ExtraDenyPackages) |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim() } |
+        Sort-Object -Unique)
+    foreach ($p in $deny) {
+        if ($p -notmatch '^[A-Za-z0-9._]+$') {
+            throw ('Get-PathMaskScopePlan: 非法包名（只允许 [A-Za-z0-9._]，该值会被拼进 shell 命令）：' + $p)
+        }
+    }
+    if ($deny.Count -eq 0) { throw 'Get-PathMaskScopePlan: deny 名单为空 —— 拒绝生成计划（deny 模式下空名单会让模块跳过加载）' }
+
+    $steps = @()
+    $steps += @{ Stage = 'S10'; Name = 'mkdir target'; Command = ('mkdir -p ' + $TargetDir); Why = '模块目录不存在时先建出来（治理可以发生在安装之前或之后）' }
+    $steps += @{ Stage = 'S10'; Name = 'mkdir backup'; Command = ('mkdir -p ' + $BackupDir); Why = '备份目录：保存改动前的原值，便于回滚' }
+    foreach ($f in @('scope_mode.conf', 'deny_packages.conf', 'write_op_policy.conf', 'procguard.conf', 'auto_scene_debugfs.conf')) {
+        $steps += @{
+            Stage   = 'S10'
+            Name    = ('backup ' + $f)
+            Command = ('test -e ' + $BackupDir + '/' + $f + ' || cp -f ' + $TargetDir + '/' + $f + ' ' + $BackupDir + '/' + $f + ' 2>/dev/null || true')
+            Why     = '只备份一次：已存在的备份绝不覆盖（否则第二次治理会把被改过的值当成原值）'
+        }
+    }
+    $steps += @{ Stage = 'S10'; Name = 'scope_mode.conf'; Command = ('echo deny > ' + $TargetDir + '/scope_mode.conf'); Why = 'deny（出厂默认）：只有 deny/allow 才查应用名单；global 会让每个 App 都看不到被遮路径' }
+    $steps += @{ Stage = 'S10'; Name = 'write_op_policy.conf'; Command = ('echo passthrough > ' + $TargetDir + '/write_op_policy.conf'); Why = '出厂默认 passthrough：eacces 会把本该透传的写操作变成权限错误（只有明确对抗检测才需要）' }
+    $steps += @{ Stage = 'S10'; Name = 'procguard.conf'; Command = ('echo 0 > ' + $TargetDir + '/procguard.conf'); Why = '出厂默认 0：procguard 在内核里把 gid 3009(AID_READPROC) 对隔离进程失效，属可选项，不默认开' }
+    $steps += @{ Stage = 'S10'; Name = 'auto_scene_debugfs.conf'; Command = ('echo 0 > ' + $TargetDir + '/auto_scene_debugfs.conf'); Why = '出厂默认 0：开启后后台窗一直在等一个并不存在的 debugfs 挂载，只留下 watch-timeout 状态' }
+    $steps += @{
+        Stage   = 'S10'
+        Name    = 'deny_packages.conf'
+        Command = ('( ' + ((@($deny) | ForEach-Object { 'echo ' + $_ }) -join '; ') + ' ) > ' + $TargetDir + '/deny_packages.conf')
+        Why     = ('出厂 4 个 ∪ 本 pack 的检测器 ⇒ ' + $deny.Count + ' 个包（一行一个，去重排序）')
+    }
+    $steps += @{
+        Stage   = 'S10'
+        Name    = 'verify'
+        Command = ('grep -qx deny ' + $TargetDir + '/scope_mode.conf' +
+            ' && grep -qx passthrough ' + $TargetDir + '/write_op_policy.conf' +
+            ' && grep -qx 0 ' + $TargetDir + '/procguard.conf' +
+            ' && grep -qx 0 ' + $TargetDir + '/auto_scene_debugfs.conf' +
+            ' && grep -qx ' + $deny[0] + ' ' + $TargetDir + '/deny_packages.conf')
+        Why     = '读写回验：退出码即判据；没落到安全值必须报失败，不许静默继续'
+    }
+    # 逐个输出，调用方用 @(...) 快照；不要用 `,$steps` 或 -NoEnumerate（同 Get-TargetListPlan）。
+    $steps
+}
+
 function Get-CleanupPlan {
     <#
     .SYNOPSIS
@@ -1360,6 +1477,50 @@ function Invoke-HidingLibSelfTest {
         $cpNoArg = Get-CleanupPlan
         Assert-HidingTruth -Condition ((@($cpNoArg | Where-Object { $_.Command -match '\*' })).Count -eq 0) -Message 'Get-CleanupPlan 负控：无参数调用同样不得出现通配删除'
         Assert-HidingTruth -Condition (@($cp).Count -gt 0 -and @($cpNoArg).Count -gt 0) -Message 'Get-CleanupPlan 正控：无参数调用必须仍返回计划'
+
+        # ----- PathMask 作用域判定（纯函数）：三态，Unknown 绝不塌成 deny -----
+        $sc0 = Get-PathMaskScopeFromLines -Lines @()
+        Assert-HidingTruth -Condition ($sc0.State -ceq 'Unknown') -Message 'Get-PathMaskScopeFromLines 负控：空输入必须是 Unknown（不许回落成 deny）'
+        $sc1 = Get-PathMaskScopeFromLines -Lines @('PATHMASK_SCOPE_ABSENT')
+        Assert-HidingTruth -Condition ($sc1.State -ceq 'Unknown') -Message 'Get-PathMaskScopeFromLines 负控：文件缺失哨兵必须是 Unknown'
+        $sc2 = Get-PathMaskScopeFromLines -Lines @('global')
+        Assert-HidingTruth -Condition ($sc2.State -ceq 'Global') -Message 'Get-PathMaskScopeFromLines 正控：global 必须判成 Global'
+        $sc3 = Get-PathMaskScopeFromLines -Lines @('deny')
+        Assert-HidingTruth -Condition ($sc3.State -ceq 'Scoped') -Message 'Get-PathMaskScopeFromLines 正控：deny 必须判成 Scoped'
+        $sc4 = Get-PathMaskScopeFromLines -Lines @("allow`r")
+        Assert-HidingTruth -Condition ($sc4.State -ceq 'Scoped') -Message 'Get-PathMaskScopeFromLines 正控：CRLF 行尾必须被 trim 后仍判成 Scoped'
+        $sc5 = Get-PathMaskScopeFromLines -Lines @('passthrough')
+        Assert-HidingTruth -Condition ($sc5.State -ceq 'Unknown') -Message 'Get-PathMaskScopeFromLines 负控：不认识的取值必须是 Unknown'
+        $sc6 = Get-PathMaskScopeFromLines -Lines @('', 'global', 'deny')
+        Assert-HidingTruth -Condition ($sc6.State -ceq 'Scoped') -Message 'Get-PathMaskScopeFromLines 正控：多行取最后一个非空取值（确定性）'
+        $sc7 = Get-PathMaskScopeFromLines -Lines @('  GLOBAL  ')
+        Assert-HidingTruth -Condition ($sc7.State -ceq 'Unknown') -Message 'Get-PathMaskScopeFromLines 负控：取值必须区分大小写（GLOBAL 不是模块认的 global）'
+
+        # ----- PathMask 作用域治理：只写模块出厂默认值，绝不碰用户的 target_path -----
+        $pm = Get-PathMaskScopePlan -ExtraDenyPackages @('bin.mt.plus.canary', 'luna.safe.luna', '')
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Stage -ne 'S10' })).Count -eq 0) -Message 'Get-PathMaskScopePlan 正控：Stage 必须都是 S10'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Name -eq 'scope_mode.conf' -and $_.Command -eq 'echo deny > /data/adb/pathmask/scope_mode.conf' })).Count -eq 1) -Message 'Get-PathMaskScopePlan 正控：scope_mode 必须写 deny（出厂默认）'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Command -match '(?<![a-z])global' })).Count -eq 0) -Message 'Get-PathMaskScopePlan 负控：任何步骤都不得写入 global 作用域'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Name -eq 'write_op_policy.conf' -and $_.Command -match 'echo passthrough ' })).Count -eq 1) -Message 'Get-PathMaskScopePlan 正控：write_op_policy 必须回出厂默认 passthrough'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Name -eq 'procguard.conf' -and $_.Command -match 'echo 0 ' })).Count -eq 1) -Message 'Get-PathMaskScopePlan 正控：procguard 必须回出厂默认 0'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Name -eq 'auto_scene_debugfs.conf' -and $_.Command -match 'echo 0 ' })).Count -eq 1) -Message 'Get-PathMaskScopePlan 正控：auto_scene_debugfs 必须回出厂默认 0'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Command -match 'target_path' })).Count -eq 0) -Message 'Get-PathMaskScopePlan 负控：不得触碰用户的 target_path.conf（掩蔽目标由用户决定）'
+        $denyStep = @($pm | Where-Object { $_.Name -eq 'deny_packages.conf' })
+        Assert-HidingTruth -Condition ($denyStep.Count -eq 1) -Message 'Get-PathMaskScopePlan 正控：应恰有一步写 deny_packages.conf'
+        foreach ($factory in @('com.chunqiunativecheck', 'com.eltavine.duckdetector', 'luna.safe.luna', 'me.garfieldhan.holmes')) {
+            Assert-HidingTruth -Condition ($denyStep[0].Command -match [regex]::Escape($factory)) -Message ('Get-PathMaskScopePlan 正控：deny 名单必须含模块出厂项 ' + $factory)
+        }
+        Assert-HidingTruth -Condition ($denyStep[0].Command -match [regex]::Escape('bin.mt.plus.canary')) -Message 'Get-PathMaskScopePlan 正控：deny 名单必须并入传入的检测器包名'
+        Assert-HidingTruth -Condition ($denyStep[0].Command -notmatch 'echo\s+;') -Message 'Get-PathMaskScopePlan 负控：空包名不得变成一条裸 echo（会写出空行）'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Command -match '(?i)\b(cat|base64|hexdump|od)\b' })).Count -eq 0) -Message 'Get-PathMaskScopePlan 负控：不得出现读取文件内容的命令'
+        Assert-HidingTruth -Condition ((@($pm | Where-Object { $_.Command -match '^echo ' -and $_.Command -notmatch ' > /data/adb/pathmask/' })).Count -eq 0) -Message 'Get-PathMaskScopePlan 负控：echo 的目标必须都是 /data/adb/pathmask/ 下的文件'
+        Assert-HidingTruth -Condition ((@($pm)[-1].Name) -eq 'verify') -Message 'Get-PathMaskScopePlan 正控：最后一步必须是读写回验'
+        Assert-HidingThrows { Get-PathMaskScopePlan -ExtraDenyPackages @('bad name') } 'Get-PathMaskScopePlan 负控：含空格的包名必须 throw（会被拼进 shell 命令）'
+        Assert-HidingThrows { Get-PathMaskScopePlan -ExtraDenyPackages @('pkg;rm -rf /') } 'Get-PathMaskScopePlan 负控：含分号的包名必须 throw（命令注入）'
+        $pmDefaults = @(Get-PathMaskScopePlan)
+        $pmDenyDefault = @($pmDefaults | Where-Object { $_.Name -eq 'deny_packages.conf' })[0].Command
+        Assert-HidingTruth -Condition ($pmDenyDefault -match 'chunqiunativecheck') -Message 'Get-PathMaskScopePlan 正控：无额外包名时仍必须写出厂 4 个'
+        Assert-HidingTruth -Condition ($pmDefaults.Count -ge 12) -Message ('Get-PathMaskScopePlan 正控：默认计划应含 mkdir/备份/写入/回验，实际=' + $pmDefaults.Count)
 
         # ===== 10. Assert-HidingTruth 本身：必须能失败 =====
         Assert-HidingTruth -Condition $true -Message 'Assert-HidingTruth 正控：$true 不应抛出'

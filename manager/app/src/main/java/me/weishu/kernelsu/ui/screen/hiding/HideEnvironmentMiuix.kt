@@ -551,6 +551,19 @@ private fun HidingPackCardMiuix(uiState: HideEnvironmentUiState, actions: HideEn
                 summary = null
             )
         }
+        // A `global` PathMask masks its target paths for every app, not just the listed ones, so a
+        // target that really exists turns into a device-wide anomaly. That state lives in
+        // /data/adb/pathmask and survives reinstalls (the module only seeds a missing file), so the
+        // app reports it here and never pretends the row is fine.
+        if (uiState.packState == HidingPackState.Ready &&
+            uiState.pathMaskScope == PathMaskScope.Global
+        ) {
+            HeaderComponentMiuix(
+                icon = Icons.Rounded.Warning,
+                title = stringResource(id = R.string.hide_environment_pathmask_scope_global),
+                summary = null
+            )
+        }
         when (uiState.packState) {
             HidingPackState.Loading -> Unit
             HidingPackState.Unavailable -> HeaderComponentMiuix(
@@ -923,9 +936,9 @@ private fun PropsCardMiuix(uiState: HideEnvironmentUiState, actions: HideEnviron
         ) {
             TextButton(
                 text = stringResource(id = R.string.hide_environment_props_apply_once),
-                // 应用一次是离线产物安装，App 内无法完成：按钮保持禁用，不伪造成交。
+                // 与 Material 主题同一行为：可点击并走上层动作。App 内做不了的动作由 ViewModel
+                // 统一提示卡片标题，绝不伪装成功；两个主题的可用性必须一致。
                 onClick = actions.onApplyPropsOnce,
-                enabled = false,
                 colors = ButtonDefaults.textButtonColorsPrimary()
             )
         }
@@ -1053,9 +1066,9 @@ private fun CleanupCardMiuix(uiState: HideEnvironmentUiState, actions: HideEnvir
         ) {
             TextButton(
                 text = stringResource(id = R.string.hide_environment_cleanup_run),
-                // 清单是只读探测的结果，与管线执行那一刻可能不同：清痕只由隐藏管道执行。
+                // 与 Material 主题同一行为：先弹确认框，确认后走上层动作。清单是只读探测的结果，
+                // 与管线执行那一刻可能不同；两个主题的可用性必须一致。
                 onClick = { showConfirm.value = true },
-                enabled = false,
                 colors = ButtonDefaults.textButtonColorsPrimary()
             )
         }

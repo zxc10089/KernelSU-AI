@@ -97,6 +97,7 @@ param(
     [string]$KeyboxPath = '',
     [string]$SecurityPatchPath = '',
     [string]$TargetListPath = '',
+    [switch]$PathMaskScope,
     [switch]$Detectors,
     [switch]$SkipModules,
     [switch]$Json,
@@ -317,6 +318,16 @@ function Invoke-HidingOnekeySelfTest {
     $names = (@($kb) | ForEach-Object { [string](Get-HidingField $_ 'Stage') + ':' + [string](Get-HidingField $_ 'Name') }) -join ' | '
     Assert-HidingTruth -Condition ($names -ceq 'S7:chattr -i | S7:write-tmp | S7:chown 0:0 | S7:chmod 600 | S7:mv -f | S7:test -s') -Message ("onekey keybox 步骤序列不符：" + $names)
 
+    # (e2) PathMask 作用域治理：只写模块出厂默认值，且 deny 名单必须并入本 pack 的检测器包名
+    $pm = @(Get-PathMaskScopePlan -ExtraDenyPackages @('com.chunqiunativecheck'))
+    Assert-HidingTruth -Condition ((@($pm | Where-Object { [string](Get-HidingField $_ 'Name') -ceq 'scope_mode.conf' })).Count -eq 1) -Message 'onekey 的 pathmask 治理计划缺少 scope_mode.conf 步骤'
+    Assert-HidingTruth -Condition ((@($pm | Where-Object { [string](Get-HidingField $_ 'Command') -match '(?<![a-z])global' })).Count -eq 0) -Message 'onekey 的 pathmask 治理计划不得写入 global'
+    $detPkgs = @($real.Manifest.Entries |
+        Where-Object { [string](Get-HidingField $_ 'category') -ceq 'detector' } |
+        ForEach-Object { [string](Get-HidingField $_ 'packageName') })
+    Assert-HidingTruth -Condition ($detPkgs.Count -ge 1) -Message '真实 manifest 的 detector 条目取不到 packageName（pathmask 的 deny 名单会残缺）'
+    Assert-HidingTruth -Condition ((@($detPkgs | Where-Object { [string]::IsNullOrWhiteSpace($_) })).Count -eq 0) -Message '真实 manifest 里有 detector 条目缺 packageName'
+
     # (f) pm install 的裁决规则：只有独立一行 Success 才算装好；Failure 绝不能被判为成功。
     Assert-HidingTruth -Condition (Test-PmInstallOutput "Performing Streamed Install`nSuccess") -Message 'onekey 裁决：Success 未被识别为成功'
     Assert-HidingTruth -Condition (-not (Test-PmInstallOutput 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]')) -Message 'onekey 裁决：Failure 被误判为成功'
@@ -392,6 +403,11 @@ if (-not [string]::IsNullOrWhiteSpace($KeyboxPath)) { [void]$extra.Add('keybox')
 if (-not [string]::IsNullOrWhiteSpace($SecurityPatchPath)) { [void]$extra.Add('security-patch') }
 if (-not [string]::IsNullOrWhiteSpace($TargetListPath)) { [void]$extra.Add('target-list') }
 if ($Detectors) { [void]$extra.Add('detectors') }
+# PathMask 的作用域配置跨重装存活、每次开机被重申：只装模块不治理配置，等于把一条可能被改坏的作用域
+# （例如 global ⇒ 全机每个 App 都看不到被遮路径）一遍遍重申。装 pathmask 时自动带治理步骤，也可以用
+# -PathMaskScope 单独治理一台已经装好模块的设备。
+$planHasPathMask = (@($planInfo.Plan | Where-Object { [string](Get-HidingField $_ 'category') -ceq 'pathmask' }).Count -gt 0)
+if ($PathMaskScope -or $planHasPathMask) { [void]$extra.Add('pathmask-scope') }
 $extra = @($extra)
 
 if (-not $Apply) {
@@ -432,7 +448,8 @@ if (-not $Apply) {
 $needRoot = ((-not $SkipModules) -and $planIds.Count -gt 0) -or $InstallPropsModule `
     -or (-not [string]::IsNullOrWhiteSpace($KeyboxPath)) `
     -or (-not [string]::IsNullOrWhiteSpace($SecurityPatchPath)) `
-    -or (-not [string]::IsNullOrWhiteSpace($TargetListPath))
+    -or (-not [string]::IsNullOrWhiteSpace($TargetListPath)) `
+    -or $PathMaskScope -or $planHasPathMask
 if ($needRoot -and -not $root.Ok) {
     Write-Host 'hiding-onekey: 设备没有可用的 root，已停止，未做任何写入（fail-closed）。'
     Write-Host ('  探测结果：' + $root.Why)
@@ -602,6 +619,32 @@ foreach ($x in $extra) {
         } else {
             $s = New-StepResult -Index $idx -Total $total -Name 'target-list' -Status '失败' -Error $err
             [void]$steps.Add($s); [void]$failures.Add('target-list'); Write-Host (Format-StepLine $s)
+        }
+    }
+    elseif ($x -ceq 'pathmask-scope') {
+        $idx++
+        $err = ''
+        # 检测器包名取自冻结清单（category=detector 的 packageName），与 App 快捷安装卡同源。
+        # 治理只写模块出厂默认值，绝不碰用户的 target_path.conf。
+        $denyExtra = @($planInfo.Manifest.Entries |
+            Where-Object { [string](Get-HidingField $_ 'category') -ceq 'detector' } |
+            ForEach-Object { [string](Get-HidingField $_ 'packageName') })
+        $psPlan = @(Get-PathMaskScopePlan -ExtraDenyPackages $denyExtra)
+        if ($psPlan.Count -eq 0) {
+            $err = 'pathmask 作用域计划为空（拒绝静默当作成功）'
+        } else {
+            foreach ($k in $psPlan) {
+                $cmd = [string](Get-HidingField $k 'Command')
+                $r = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command $cmd
+                if (-not $r.Ok) { $err = ('pathmask 作用域步骤失败（' + [string](Get-HidingField $k 'Name') + '）：' + $r.Why); break }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($err)) {
+            $s = New-StepResult -Index $idx -Total $total -Name 'pathmask-scope' -Status '成功'
+            [void]$steps.Add($s); Write-Host (Format-StepLine $s)
+        } else {
+            $s = New-StepResult -Index $idx -Total $total -Name 'pathmask-scope' -Status '失败' -Error $err
+            [void]$steps.Add($s); [void]$failures.Add('pathmask-scope'); Write-Host (Format-StepLine $s)
         }
     }
     elseif ($x -ceq 'detectors') {

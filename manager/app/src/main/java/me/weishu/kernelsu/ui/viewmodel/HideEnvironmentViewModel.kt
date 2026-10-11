@@ -38,6 +38,7 @@ import me.weishu.kernelsu.ui.screen.hiding.HidingPackState
 import me.weishu.kernelsu.ui.screen.hiding.KeyboxState
 import me.weishu.kernelsu.ui.screen.hiding.KeyboxStatus
 import me.weishu.kernelsu.ui.screen.hiding.OneKeyHideOptions
+import me.weishu.kernelsu.ui.screen.hiding.PathMaskScope
 import me.weishu.kernelsu.ui.screen.hiding.PropsOutcome
 import me.weishu.kernelsu.ui.screen.hiding.PropsRow
 import me.weishu.kernelsu.ui.screen.hiding.SusfsProbe
@@ -87,6 +88,14 @@ class HideEnvironmentViewModel(
 
         /** resetprop 的绝对路径（ksud 多调用符号链接，hiding-lib.ps1 同样用绝对路径）。 */
         const val RESETPROP_PATH = "/data/adb/ksu/bin/resetprop"
+
+        /**
+         * PathMask 自己的持久状态：它交给内核的 scope_mode 就来自这里。模块 service.sh 的
+         * `seed_config_file` 只在文件缺失/为空时写，所以这个值跨重装存活、每次开机重申。
+         * 只在 App 内只读探测：`global` 时模块不查应用名单，本机每个 App 都看不到被遮路径——
+         * 而它的目标里 `/system_ext/app/SoterService` 在本机真实存在，于是变成环境异常。
+         */
+        const val PATHMASK_SCOPE_CONF = "/data/adb/pathmask/scope_mode.conf"
 
         /** 探针在「目标不存在 / 探测不可用」时回落的哨兵，避免把空输出当成答案。 */
         const val PROBE_SENTINEL = "KSU_HIDE_NA"
@@ -244,6 +253,7 @@ class HideEnvironmentViewModel(
                     keybox = integrity.keybox,
                     targetList = integrity.targetList,
                     susfs = integrity.susfs,
+                    pathMaskScope = integrity.pathMaskScope,
                     propsRows = integrity.propsRows,
                     isPropsModuleInstalled = integrity.isPropsModuleInstalled,
                     zygisk = integrity.zygisk,
@@ -259,6 +269,7 @@ class HideEnvironmentViewModel(
         val keybox: KeyboxStatus,
         val targetList: TargetListStatus,
         val susfs: SusfsProbe,
+        val pathMaskScope: PathMaskScope,
         val propsRows: List<PropsRow>,
         val isPropsModuleInstalled: Boolean,
         val zygisk: ZygiskReinforcement,
@@ -292,6 +303,7 @@ class HideEnvironmentViewModel(
                     enabled = null,
                     note = "探测不可用（未取得 root）：状态未知，不猜",
                 ),
+                pathMaskScope = PathMaskScope.Unknown,
                 propsRows = PROPS_EXPECTED.map { (name, expected) ->
                     PropsRow(name = name, expected = expected)
                 } + PROPS_DELETED.map { PropsRow(name = it, expected = "") },
@@ -306,6 +318,7 @@ class HideEnvironmentViewModel(
         val keybox = readKeyboxStatus(shell)
         val targetList = readTargetListStatus(shell)
         val susfs = readSusfsProbe(shell)
+        val pathMaskScope = readPathMaskScope(shell)
         val props = readPropsStatus(shell)
         val cleanupPaths = readCleanupCandidates(shell, visibleEntries)
         val isResumePending = runRootCommand(
@@ -317,6 +330,7 @@ class HideEnvironmentViewModel(
             keybox = keybox,
             targetList = targetList,
             susfs = susfs,
+            pathMaskScope = pathMaskScope,
             propsRows = props.rows,
             isPropsModuleInstalled = props.moduleInstalled,
             zygisk = zygisk,
@@ -397,17 +411,46 @@ class HideEnvironmentViewModel(
             "if test -e /proc/susfs || grep -q -i susfs /proc/kallsyms 2>/dev/null || " +
                 "grep -q -i susfs /proc/version 2>/dev/null; then echo DETECTED; else echo NOT_DETECTED; fi",
         )
+        if (result == null || result.code != 0) {
+            return SusfsProbe(enabled = null, note = "探测不可用：状态未知，不猜")
+        }
+        // 必须整行相等：探针的两个回答互为子串（"NOT_DETECTED".contains("DETECTED") == true），
+        // 用 contains 判定会把「没有 SUSFS」读成「已启用」——失败方向是乐观的，最坏的一种。
+        // 先判否定答案，再判肯定答案；两个都没有就保持 Unknown，绝不猜。
+        val answers = result.lines.filter { it.isNotEmpty() }
         return when {
-            result == null || result.code != 0 ->
-                SusfsProbe(enabled = null, note = "探测不可用：状态未知，不猜")
-
-            result.joined.contains("DETECTED") ->
-                SusfsProbe(enabled = true, note = "已探测到内核侧 SUSFS 痕迹")
-
-            result.joined.contains("NOT_DETECTED") ->
+            "NOT_DETECTED" in answers ->
                 SusfsProbe(enabled = false, note = "未探测到内核侧 SUSFS 痕迹")
 
+            "DETECTED" in answers ->
+                SusfsProbe(enabled = true, note = "已探测到内核侧 SUSFS 痕迹")
+
             else -> SusfsProbe(enabled = null, note = "探测输出无法解析：状态未知，不猜")
+        }
+    }
+
+    /**
+     * PathMask 作用域只读探测。`deny`/`allow` 才是「只对名单里的 App 掩蔽」，`global` 是
+     * 「不查名单、每个 App 都掩蔽」——模块自带 WebUI 原文：`Global mode: every app loses sight
+     * of the hidden paths; the app list is not consulted.` 读不到、文件不存在、值不认识都回
+     * Unknown，绝不用 Scoped 冒充「安全」。
+     */
+    private fun readPathMaskScope(shell: Shell): PathMaskScope {
+        val result = probe(
+            shell,
+            "if test -s $PATHMASK_SCOPE_CONF; then " +
+                "echo \"SCOPE=\$(head -n 1 $PATHMASK_SCOPE_CONF | tr -d '\\r ')\"; " +
+                "else echo \"$PROBE_ABSENT_PREFIX\"; fi",
+        ) ?: return PathMaskScope.Unknown
+        if (result.code != 0 || result.joined.contains(PROBE_ABSENT_PREFIX)) {
+            return PathMaskScope.Unknown
+        }
+        val value = result.lines.firstOrNull { it.startsWith("SCOPE=") }
+            ?.removePrefix("SCOPE=")?.trim()?.lowercase()
+        return when (value) {
+            "global" -> PathMaskScope.Global
+            "deny", "allow" -> PathMaskScope.Scoped
+            else -> PathMaskScope.Unknown
         }
     }
 

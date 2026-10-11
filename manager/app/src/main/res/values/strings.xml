@@ -332,6 +332,7 @@
 <string name="hide_environment_pack_reboot_hint">Reboot to take effect</string>
 <string name="hide_environment_pack_scope_modules">Modules</string>
 <string name="hide_environment_pack_scope_pathmask">Kernel path mask</string>
+<string name="hide_environment_pathmask_scope_global">PathMask scope is global: the app list is ignored, so every app on this device loses the masked paths and the environment misbehaves. Switch the scope back to deny/allow in the PathMask WebUI.</string>
 <string name="hide_environment_pack_scope_detectors">Detection testers</string>
 <string name="hide_environment_pack_scope_data">Data</string>
 <string name="hide_environment_install_failed">Error: %s</string>
