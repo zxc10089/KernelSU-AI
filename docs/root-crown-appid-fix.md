@@ -19,7 +19,7 @@
 
 1. 白名单证书是 **公开的 AOSP debug 证书**（`f9af24bd…63d0e`，任何用 Android 默认 debug key 签名的 APK 都满足），
    而不是项目自己的私有 release key（原版为 `0x033b` / `c371061b…d2d6`）。
-2. 构建时**没有定义 `KSU_MANAGER_PACKAGE`**（ko 内不存在 `me.weishu` 字符串），于是包名校验被编译掉，
+2. 构建时**没有定义 `KSU_PACKAGE_NAME`**（ko 内不存在 `me.weishu` 字符串），于是包名校验被编译掉，
    只剩证书比对。
 
 因此 `search_manager()` 遍历 `/data/app` 时，**第一个匹配证书的 APK 就赢得加冕**。实测设备上共有两个
@@ -136,7 +136,7 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
    证书 SHA-256 **`ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec`**。
    公开事实写在 `_tools/project-signer.json`；私钥与口令只在 `_artifacts/builder/keystore/keystore.properties`（不入库）。
 2. **ko 常量改用这张证书**：`KSU_EXPECTED_SIZE=0x342`、`KSU_EXPECTED_HASH=ca40af…`，并定义
-   `KSU_MANAGER_PACKAGE=me.weishu.kernelsu.hide`（`kernel/Kbuild:130-157` 会转成 ccflag，让同证书的其他包名也匹配不上）。
+   `KSU_PACKAGE_NAME=me.weishu.kernelsu.hide`（`kernel/Kbuild:130-157` 会转成 ccflag，让同证书的其他包名也匹配不上）。
 
 交付有两条路径，**源码构建是正式路径**：
 
@@ -147,15 +147,15 @@ sha256 `76ee9de4…d255`，已确认是当前运行的那一份）。两条路�
 
 **路径 A 已落地（2026-10-05）**：`.github/workflows/build-lkm-fork.yml` 触发的 DDK CI（run `37305609190`，`Build kernelsu.ko for android15-6.6` 全绿）产出源码构建的 ko，经 `_tools/adopt-lkm-asset.ps1 -Ko <built.ko> -Verify` 收编为内置资产：
 
-- `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`：**315,280 字节**，sha256 `105ec969f2697459e9f8a9f14d643fc1ba58dbf3660200d08c877bca10b3e374`，含 `me.weishu.kernelsu.hide` 字符串（= `KSU_MANAGER_PACKAGE` 已编译进内核模块，包名校验生效）；同一 CI 产物在 `ci/lkm` 分支留档。
+- `userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`：**315,280 字节**，sha256 `105ec969f2697459e9f8a9f14d643fc1ba58dbf3660200d08c877bca10b3e374`，含 `me.weishu.kernelsu.hide` 字符串（= `KSU_PACKAGE_NAME` 已编译进内核模块，包名校验生效）；同一 CI 产物在 `ci/lkm` 分支留档。
 - 被替换的路径 B 产物归档到 `_artifacts/builder/evidence/android15-6.6_kernelsu-pathB-bytepatch.ko`（sha256 `d537e0d7…c9178`）。
 - vermagic 四种 ko 副本完全一致（`6.6.127-4k-g46a034eca005-dirty SMP preempt mod_unload modversions aarch64`），所以源码构建与设备上已在跑的回退产物一样可加载。
 
 **全矩阵已补齐（2026-10-05）**：run `37312303026`（master `85d4955`）把上游 8 个 KMI × 2 个 ABI 全跑绿（首轮产物带 `-DKSU_VERSION=16`，同日由 run `37324382993` 重建为 32601 并整体替换），16 个产物逐个经 `_tools/adopt-lkm-asset.ps1 -Abi <abi> -Kmi <kmi>` 校验身份后收编进 `userspace/ksud/bin/`；本机设备是 android15-6.6，它的那一份与上面 315,280 字节的产物逐字节相同。逐项字节数与 sha256 见 `docs/upstream-alignment.md` 第 7 节。
 
-**路径 B（回退，本机无 DDK 容器时的应急方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的——只靠「私钥证书唯一」达到同等效果：
+**路径 B（回退，本机无 DDK 容器时的应急方式）**：等长字节补丁，与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_PACKAGE_NAME` 的包名校验仍是编译掉的——只靠「私钥证书唯一」达到同等效果：
 
-- 校验闸门同时是两条路径的判据：路径 A 的产物含 `me.weishu.kernelsu.hide` 字符串（只有真正定义 `KSU_MANAGER_PACKAGE` 才会出现），路径 B 的产物没有；`_tools/verify-identity.ps1 -RequireSourceBuild` 把包名这一项作为闸门（缺字符串即 FAIL），不带该开关时只报 `provenance=path A/path B` 的 WARN。
+- 校验闸门同时是两条路径的判据：路径 A 的产物含 `me.weishu.kernelsu.hide` 字符串（只有真正定义 `KSU_PACKAGE_NAME` 才会出现），路径 B 的产物没有；`_tools/verify-identity.ps1 -RequireSourceBuild` 把包名这一项作为闸门（缺字符串即 FAIL），不带该开关时只报 `provenance=path A/path B` 的 WARN。
 
 **镜像产物（源码 ko + 冠位预置 + 32601 驱动）**：`_tmp/flash/init_boot_a_32601_appid10627.img`（8,388,608 字节，sha256 `43f6fbe63e18f8d6d9a16763378543c6626015b1a4d85821ac9e2b719c772cf3`，内嵌 ko 315,280 字节 sha256 `fefb635be691a6484a45c5d86e7d5ac7e04a44c0069be36f572ae9d8590bad1d`，`identity-lib.ps1` 的 `Find-KsuVersion` 读出 32601/flags 0x1）；基座是上一版 `_tmp/init_boot_a_sourceko_appid10627.img`（sha256 `4fbe9ef40eb0c38a52954527010f9085a07e7236cce26b6c3114e0a5d230f844`，驱动版本仍是 16），构建方式：
 

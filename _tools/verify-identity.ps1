@@ -30,7 +30,7 @@ param(
     # fail and pass, so a PASS can never be mistaken for a check that is simply unable to match.
     [switch]$SelfTest,
     # Make the LKM asset's PROVENANCE a hard gate: a module built from source compiles the manager
-    # package name in (-DKSU_MANAGER_PACKAGE), the byte-patch fallback cannot. Without this switch
+    # package name in (-DKSU_PACKAGE_NAME), the byte-patch fallback cannot. Without this switch
     # a byte-patched asset is only a warning, because it is still cert-identical to a source build.
     [switch]$RequireSourceBuild
 )
@@ -96,7 +96,7 @@ if ($SelfTest) {
     # properties file. (A module built by the broken Kbuild reports 16 -- that is the failure mode.)
     . (Join-Path $PSScriptRoot 'identity-lib.ps1')
     $tmpA = Join-Path $env:TEMP ('ksu-props-' + [guid]::NewGuid().ToString('N') + '.properties')
-    Set-Content -LiteralPath $tmpA -Value @('KSU_PACKAGE_NAME=me.weishu.kernelsu.hide', 'KSU_VERSION_CODE=32601', 'KSU_VERSION_NAME=v3.3.0+main') -Encoding ASCII
+    Set-Content -LiteralPath $tmpA -Value @('KSU_PACKAGE_NAME=me.weishu.kernelsu.hide', 'KSU_VERSION_CODE=32601', 'KSU_VERSION_NAME=v3.3.1+main') -Encoding ASCII
     $tmpB = Join-Path $env:TEMP ('ksu-props-' + [guid]::NewGuid().ToString('N') + '.properties')
     Set-Content -LiteralPath $tmpB -Value @('KSU_PACKAGE_NAME=me.weishu.kernelsu.hide') -Encoding ASCII
     $pinned = Get-PinnedKsuVersion -PropsPath $tmpA
@@ -305,12 +305,12 @@ if ($assets.Count -eq 0) {
                 Check "LKM asset expects the project cert DER length" $immOk "$rel [$arch] expected-size imm=$found (want $wantSize = 0x$('{0:X}' -f $wantSize))"
             }
         }
-        # PROVENANCE: -DKSU_MANAGER_PACKAGE compiles the manager package name into is_manager_apk().
+        # PROVENANCE: -DKSU_PACKAGE_NAME compiles the manager package name into is_manager_apk().
         # A byte-patched asset rewrites the cert hash and the DER-length immediate only, so the
         # package gate is absent and the asset is cert-identical to a source build -- report that
         # difference instead of letting it hide behind an identical hash check.
         $nPkg = ([regex]::Matches($text, [regex]::Escape($ExpectedPackage))).Count
-        $prov = if ($nPkg -ge 1) { 'path A (from source: KSU_MANAGER_PACKAGE compiled in)' } else { 'path B (byte-patched: cert only)' }
+        $prov = if ($nPkg -ge 1) { 'path A (from source: KSU_PACKAGE_NAME compiled in)' } else { 'path B (byte-patched: cert only)' }
         Write-Host ("       {0} provenance={1} pkg-string x{2}" -f $rel, $prov, $nPkg)
         if ($RequireSourceBuild) {
             Check "LKM asset is a source build (manager package name compiled in)" ($nPkg -ge 1) "$rel pkg-string x$nPkg (want >= 1)"

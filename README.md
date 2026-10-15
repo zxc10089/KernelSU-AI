@@ -1,12 +1,13 @@
 # KernelSU-AI · 一键环境隐藏 + 内置 AI 控制台
 
-> 基于 **KernelSU v3.3.0** 的定制分支。两个核心特性：把「环境隐藏」做成管理器底部导航里的**一键安装链路**，并在管理器内**内置 AI 控制台**（用户自带 API Key、访问范围三档、计划模式、操作审计与撤销；操作历史只记 AI 的动作，用户在设置页改档位不写进这张列表）。隐藏资源包与预编译 `ksud` 随仓库分发，克隆即可出包。
+> 基于 **KernelSU v3.3.1** 的定制分支（2026-10-16 已用 graft 把 git 历史接到上游并合入 v3.3.1，合并提交 `4d824711`；做法与验证见 [docs/upstream-alignment.md](docs/upstream-alignment.md) §8）。两个核心特性：把「环境隐藏」做成管理器底部导航里的**一键安装链路**，并在管理器内**内置 AI 控制台**（用户自带 API Key、访问范围三档、计划模式、操作审计与撤销；操作历史只记 AI 的动作，用户在设置页改档位不写进这张列表）。隐藏资源包与预编译 `ksud` 随仓库分发，克隆即可出包。
 
 | 项 | 值 |
 | --- | --- |
-| 上游基线 | KernelSU v3.3.0 |
+| 上游基线 | KernelSU v3.3.1（合并提交 `4d824711`；`git merge-base --is-ancestor refs/tags/v3.3.1 master` 通过） |
 | 管理器包名 | `me.weishu.kernelsu.hide` |
-| 版本 | versionCode `32601` · versionName `v3.3.0+main` |
+| 版本 | versionCode `32601` · versionName `v3.3.1+main` |
+| 内置原生资产 | 16 个 `*_kernelsu.ko`、`libksud.so`、release APK 仍是 v3.3.0 / 32601 线构建的产物（重建见 [docs/upstream-alignment.md](docs/upstream-alignment.md) §8 末段） |
 | 系统要求 | Android 12+（minSdk 31 / targetSdk 37 / compileSdk 37） |
 | 许可 | GPL-3.0（继承上游，见 [LICENSE](LICENSE)） |
 | 上游仓库 | [tiann/KernelSU](https://github.com/tiann/KernelSU) |
@@ -54,11 +55,11 @@
 
 ## 与上游的差异
 
-1. **身份收口**：`manager/gradle.properties` 定义 `KSU_PACKAGE_NAME=me.weishu.kernelsu.hide`、`KSU_VERSION_CODE=32601`、`KSU_VERSION_NAME=v3.3.0+main`；`manager/app/build.gradle.kts` 的版本号优先读 Gradle property，再回退 git 推导。同一文件也是**内核模块驱动版本**的唯一来源（`kernel/Kbuild` 读它写 `-DKSU_VERSION`，见 `docs/DEVELOPMENT.md` 3.2）：管理器要求驱动版本 ≥ 32513，早期 CI 产物因为 git 判定失败回退成 16，首页会报「管理器版本 (32601) 与 KernelSU 驱动版本 (16) 不匹配」；`_tools/verify-identity.ps1` 第 5 节与 `_tools/adopt-lkm-asset.ps1` 现在都按该 pin 校验每个内置 ko。
+1. **身份收口**：`manager/gradle.properties` 定义 `KSU_PACKAGE_NAME=me.weishu.kernelsu.hide`、`KSU_VERSION_CODE=32601`、`KSU_VERSION_NAME=v3.3.1+main`；`manager/app/build.gradle.kts` 的版本号优先读 Gradle property，再回退 git 推导。同一文件也是**内核模块驱动版本**的唯一来源（`kernel/Kbuild` 读它写 `-DKSU_VERSION`，见 `docs/DEVELOPMENT.md` 3.2）：管理器要求驱动版本 ≥ 32513，早期 CI 产物因为 git 判定失败回退成 16，首页会报「管理器版本 (32601) 与 KernelSU 驱动版本 (16) 不匹配」；`_tools/verify-identity.ps1` 第 5 节与 `_tools/adopt-lkm-asset.ps1` 现在都按该 pin 校验每个内置 ko。versionCode 仍钉在 `32601`（而不是上游 v3.3.1 的 `32680`），因为随包的原生资产还是那条线构建的；源码对齐 v3.3.1 后身份宏已随上游从 `KSU_MANAGER_PACKAGE` 改名为 `KSU_PACKAGE_NAME`（并新增 `KSU_IS_PR_BUILD`），可继续用 `make KSU_PACKAGE_NAME=… KSU_EXPECTED_SIZE=… KSU_EXPECTED_HASH=…` 覆盖。
 2. **Rust 依赖源**：`Kernel-SU/*` 改为 `KernelSU2/*`（`adb_client`、`java-properties`、`ksu_props`、`rustix`），`Cargo.toml` 与 `Cargo.lock` 同步。
 3. **预编译 `libksud.so` 随仓库分发**：`manager/app/src/main/jniLibs/{arm64-v8a,x86_64}/libksud.so`（管理器构建要求 `jniLibs/arm64-v8a/libksud.so` 存在）；上游忽略这两个文件的规则已移除，没有 Rust 工具链也能出包。守护进程只发到 jniLibs 一处——`userspace/ksud/bin/x86_64` 是 x86_64 守护进程的 rust-embed 资产目录（`userspace/ksud/src/assets.rs`），副本放在那里会被下一次 x86_64 构建自己嵌进二进制。补丁后的内核模块与 `ksuinit` 同样随仓库分发：`userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko`、`userspace/ksud/bin/aarch64/ksuinit`（上游在该目录用 `**/*.ko`、`**/ksuinit` 忽略 CI 产物，本分支为这两个文件加了放行规则）。
 4. **内置隐藏资源包**（约 130 MB，含 9 个第三方检测器 APK），风险见「合规与风险」。
-5. **上游 CI 与 Dependabot 已归档**：`.github/workflows` → `.github/workflows.upstream`、`.github/dependabot.yml` → `.github/dependabot.yml.upstream`（GitHub 只识别原路径，恢复方法与说明见该目录 README）。
+5. **上游 CI 与 Dependabot 保持原样**：`.github/workflows/*.yml`（12 个）与 `.github/dependabot.yml` 都与上游一致，只在原目录多一个我方触发器 `.github/workflows/build-lkm-fork.yml`；早先的 `*.upstream` 归档已取消（对应的 `.upstream` 目录与其 README 都不再存在）。
 6. **新增内容**：`docs/`（开发文档与手册）、`design/`（设计规格）、`_tools/`（构建、校验与资源包同步脚本）。
 
 ## 目录导览
@@ -72,7 +73,7 @@ KernelSU-AI/
 ├── docs/             开发文档、开发日志、AI 控制台手册
 ├── design/           设计规格与图标
 ├── _tools/           构建 / 校验 / 资源包同步脚本（维护者工具）
-└── .github/workflows.upstream/  已归档的上游 CI
+└── .github/workflows/  上游 12 个工作流 + 我方 build-lkm-fork.yml（均在原路径）
 ```
 
 ## 文档

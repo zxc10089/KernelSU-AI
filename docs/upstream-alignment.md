@@ -1,38 +1,45 @@
 # 与上游（tiann/KernelSU）的一致性审计与构建条件
 
-> 2026-10-05。用户要求：除了我们制作的内容，其余尽可能与原版一致；没有条件就创造条件。
-> 对照对象：`_src/v3.3.0/KernelSU-3.3.0`（本分支的导入基线，commit `3e09466`）与 `_src/mainfresh/KernelSU-main`（上游 main 快照）。
+> 2026-10-05 首版；**2026-10-16 已实际执行对齐**：用 `git replace --graft` 把导入提交 `3e09466` 接到上游 v3.3.0（`932014ab`），再以真 merge 合入上游 **v3.3.1**（`0c0fdb96`），得到合并提交 `4d824711` 并推送 `origin/master`。做法、冲突面与验证见第 8 节。
+> 用户要求：除了我们制作的内容，其余尽可能与原版一致；没有条件就创造条件。
+> 对照对象：上游 tag `v3.3.0` = `932014ab`、`v3.3.1` = `0c0fdb96`、`main` = `200818ca`（本次已 fetch 进本仓库，可直接 `git diff refs/tags/v3.3.1 master` 复算）。首版审计用的 `_src/**` 快照仅作历史存档；第 3–7 节保留首版措辞，第 1、8 节为准。
 
 ## 1. 结论
 
-- `kernel/`：除 `kernel/manager/apk_sign.c` 外与上游 v3.3.0 逐字节一致（83/83 文件，仅 1 个不同）。
-- `userspace/`：5 个文件有差异（`ksud/Cargo.toml`、`ksuinit/Cargo.toml`、`ksud/build.rs`、`ksud/src/main.rs`、`ksud/bin/.gitignore`），另有 19 个我方预编译资产（8 个 KMI × 2 个 ABI 的 ko 加 2 个 ksuinit）。
-- `website/`：与上游完全一致（156/156）。
-- `.github/`：已由「归档为 `*.upstream`」恢复为上游原样，12 个工作流 + `dependabot.yml` 与上游 v3.3.0 逐字节一致（SHA-256 逐个核对）；只多一个我方触发器 `build-lkm-fork.yml`。
-- `manager/`：116 个新增 + 31 个差异，全部是我们自己的内容（AI 控制台、环境隐藏资源包、身份工具），无上游文件被误改。
-- 仓库根：`README.md`（我方）与 `Cargo.lock`（依赖组织改名导致）与上游不同，其余一致。
+**2026-10-16 合并后的现状（权威；`git diff refs/tags/v3.3.1 master` = 257 项，A=196 / M=55 / D=6）**
+
+- `kernel/`：与上游 v3.3.1 只差 14 项，除 `kernel/Kbuild` 的身份默认值外全部是导入伪影——`D` 4 项：`AGENTS.md`、`kernel/.vscode/{c_cpp_properties.json,generate_compdb.py,tasks.json}`（未随快照带入）与 `kernel/include/uapi`（符号链接被实体化）；`A` 6 项：`kernel/include/uapi/{app_profile,feature,ksu,selinux,sulog,supercall}.h`；`M` 4 项：`kernel/Kbuild`、`kernel/build-all.sh`、`kernel/build-all-x64.sh`、`kernel/setup.sh`。
+- `kernel/manager/apk_sign.c`：与上游 v3.3.1 **逐字节一致**（`git diff refs/tags/v3.3.1 master -- kernel/manager/apk_sign.c` 为空）——首版记的 6 行分叉随 v3.3.1 把 `ksu_filp_open_nonotify` 带入发布线而自然消解。
+- `userspace/`：`A` 18 项（16 个 ko + 2 个 ksuinit）、`M` 5 项（`ksud/bin/.gitignore`、`bin/{aarch64,x86_64}/busybox`、`ksud/build.rs`、`ksud/src/main.rs`）；`ksud/Cargo.toml` 已直接采用上游 v3.3.1 的版本，不再是差异项。
+- `website/`：`M` 10 项，全部是 `pt_BR/**` 的导入伪影（换行规范化与同步）。
+- `.github/`：`A` 1 项（我方触发器 `build-lkm-fork.yml`），其余与上游 v3.3.1 一致；`dependabot.yml` 与 12 个工作流都在**原路径**，首版「归档为 `*.upstream`」的说法已作废（README 与 `docs/开发文档.md` 已同步更正）。
+- `manager/`：`A` 140 + `M` 29 + `D` 1，全部是我们自己的内容（AI 控制台、环境隐藏资源包、模块制作、AI 审计、身份接线、首页适配）；29 个 `M` 都是与上游同路径的接线/适配文件。
+- 其余：`_tools/**` `A` 21、`design/**` `A` 4、`docs/**` `A` 4；`scripts/` `M` 3（`ksubot.py`、`prepare-ddk-x64.sh`、`setup_cargo_config.py`）；`docs/README_IW.md`、`docs/README_PL.md`、`manager/gradle.properties`、`manager/build.gradle.kts` 等为 `M`。
+- 相对导入基线 `3e09466`：479 文件（+53816 / −4181）。
 
 ## 2. 有意保留的分叉（属于「我们制作的内容」）
 
 | 位置 | 内容 | 依据 |
 | --- | --- | --- |
 | `manager/**`（116 新增 + 31 差异） | AI 控制台、环境隐藏、模块制作、AI 审计，以及包名/版本等身份接线 | 本分支的产品内容 |
-| `kernel/manager/apk_sign.c` | 换成上游 main 更严的 `check_v2_signature`（未知签块直接判失败） | 用户 2026-10-05 指令「把原版那套更严的合并回来」 |
+| `kernel/manager/apk_sign.c` | **已不再是分叉**：上游 v3.3.1 把 main 那套更严的 `check_v2_signature`（未知签块直接判失败）带进了发布线，2026-10-16 的合并自动收敛 | 用户 2026-10-05 指令「把原版那套更严的合并回来」；合并后与 v3.3.1 逐字节一致 |
 | `userspace/ksud/bin/{aarch64,x86_64}/{android12-5.10,android13-5.10,android13-5.15,android14-5.15,android14-6.1,android15-6.6,android16-6.12,android17-6.18}_kernelsu.ko`、两个 `ksuinit` | 上游 8 个 KMI × 2 个 ABI 的全部 ko 随仓库分发（上游用 `.gitignore` 忽略 CI 产物） | 让没有工具链的源码快照也能直接出包；矩阵来源 run `37312303026`，逐项哈希见第 7 节 |
 | `userspace/ksud/bin/.gitignore` | 放开上述全部资产的忽略规则（`**/*.ko`、`**/ksuinit` 仍忽略，再逐个放行矩阵里的 16 个 ko 与 2 个 ksuinit） | 同上 |
 | `userspace/ksud/build.rs` | `cargo:rerun-if-env-changed=KSU_PACKAGE_NAME` + 未设置时 `cargo:warning` | 保证 daemon 包名不会静默回落 |
-| `userspace/ksud/src/main.rs` | 两个 crate 级 clippy allow（`redundant_field_names`、`assert_is_empty`），注释声明只覆盖上游文件 | 本机较新 clippy 对上游代码的既有告警 |
+| `userspace/ksud/src/main.rs` | crate 级 clippy allow（`redundant_field_names`、`assert_is_empty`），注释声明只覆盖上游文件 | 本机较新 clippy 对上游代码的既有告警；v3.3.1 起上游自己也放行 `redundant_field_names`，本分支只多 `assert_is_empty` |
 | `_tools/**`、`docs/**`、`design/**` | 构建/验收工具与文档 | 本分支的工程支撑 |
 | `README.md` | 本分支说明 | 本分支的对外说明 |
 
 ## 3. 与上游 main 的对齐（不是分叉）
 
-- `userspace/ksud/Cargo.toml`、`userspace/ksuinit/Cargo.toml` 的 git 依赖组织 `Kernel-SU` → `KernelSU2`：上游 main 已经在用 `KernelSU2`，我们只是提前对齐；`prop-rs` 我们钉在 `6f5723105d8d4cacad31d83d343defbf032c7b33`（v3.3.0 的版本），main 是 `ddb6ee7294467f7f25bad2118e9e24eee104144b`。
-- `kernel/manager/apk_sign.c`：与上游 main 只差 6 行（4 增 2 删）——main 用 `ksu_filp_open_nonotify(path, O_RDONLY | O_NOATIME)`，本分支用 `filp_open(path, O_RDONLY, 0)` 加 `fp->f_mode |= FMODE_NONOTIFY`。原因：`ksu_filp_open_nonotify` 只存在于 main（`kernel/include/util.h:63` 的 static inline，被 `kernel/manager/apk_sign.c:158`、`kernel/manager/throne_tracker.c:195` 使用），在 v3.3.0 树里 0 命中；直接移植要把 main 的 `util.h`（ksyscall/arch.h 等一大组头）一并搬过来，不属于「尽量一致」的范畴。
+- `userspace/ksud/Cargo.toml`、`userspace/ksuinit/Cargo.toml` 的 git 依赖组织 `Kernel-SU` → `KernelSU2`：上游 main 已在用 `KernelSU2`，我们只是提前对齐。2026-10-16 合并后 `userspace/ksud/Cargo.toml` 直接采用上游 v3.3.1 的版本（`bindgen = "0.73"`、`prop-rs-android` rev `ddb6ee7294467f7f25bad2118e9e24eee104144b`），首版钉的 `6f5723105d8d4cacad31d83d343defbf032c7b33`（v3.3.0 版本）已不再使用。
+- `kernel/manager/apk_sign.c`：首版与上游 main 只差 6 行（4 增 2 删）——main 用 `ksu_filp_open_nonotify(path, O_RDONLY | O_NOATIME)`，当时本分支只能用 `filp_open(path, O_RDONLY, 0)` 加 `fp->f_mode |= FMODE_NONOTIFY`，因为 `ksu_filp_open_nonotify` 只存在于 main 的 `kernel/include/util.h`（v3.3.0 树里 0 命中）。**v3.3.1 把它带进了发布线**，因此合并后该文件与 v3.3.1 逐字节一致（现在的 `kernel/manager/apk_sign.c:158` 就是 `ksu_filp_open_nonotify(path, O_RDONLY | O_NOATIME)`），这条分叉已关闭。
 
 ## 4. 包名匹配的一个细节（为什么可以默认开启 `KSU_MANAGER_PACKAGE`）
 
-`kernel/manager/apk_sign.c` 的 `get_pkg_from_apk_path()`（:302）在 `/data/app/~~<b64>==/<pkg>-<b64>==/base.apk` 上取**第一个**连字符之前的部分作为包名（:326 `strchr(second_last_slash, '-')`），因此 APK 目录后缀里带连字符（实测 `me.weishu.kernelsu.hide-VNZu0x-zfCWWNVYgj3Dvhw==`）不会影响 `strncmp(pkg, KSU_MANAGER_PACKAGE, …)`（:351）——包名本身不含连字符。
+v3.3.1 起包名校验搬出了 `apk_sign.c`：`kernel/manager/apk_sign.c` 的 `is_manager_apk()`（:326）现在只做签名校验 `check_v2_signature(path, EXPECTED_SIZE, EXPECTED_HASH)`；真正的包名比对在 `kernel/manager/throne_tracker.c`——`is_expected_manager()`（:84）做 `strncmp(pkg, KSU_PACKAGE_NAME, sizeof(KSU_PACKAGE_NAME)) == 0`，:41/:302 用同一常量做遍历与比对，:76 有 `_Static_assert(sizeof(KSU_PACKAGE_NAME) < KSU_MAX_PACKAGE_NAME)`，:344 把它写进日志；`kernel/core/init.c:95` 也在启动横幅里打印包名，`kernel/supercall/dispatch.c:57/88` 用 `KSU_IS_PR_BUILD` 区分 PR 构建。
+
+APK 目录到包名的提取在 `get_pkg_from_apk_dir_path()`（`kernel/manager/apk_sign.c:301`）：先 `strrchr(path, '/')`（:307）取最后一个斜杠，再从那里 `strchr(last_slash, '-')`（:311）取**第一个**连字符，二者之间即包名（:315-321，含 `KSU_MAX_PACKAGE_NAME` 边界检查）。因此 APK 目录后缀里带连字符（实测 `me.weishu.kernelsu.hide-VNZu0x-zfCWWNVYgj3Dvhw==`）不会污染包名——包名本身不含连字符。
 
 ## 5. 创建缺失的条件：从源码构建 ko
 
@@ -73,18 +80,19 @@ foreach ($abi in @('aarch64','x86_64')) {
 ## 6. `kernel/Kbuild` 的身份默认值（本次新增）
 
 ```make
-ifndef KSU_EXPECTED_SIZE
-KSU_EXPECTED_SIZE := 0x342
+KSU_IS_PR_BUILD ?= 0
+ifeq ($(KSU_IS_PR_BUILD),0)
+KSU_PACKAGE_NAME ?= me.weishu.kernelsu.hide
+else
+KSU_PACKAGE_NAME ?= me.weishu.kernelsu.hide.pr
 endif
-ifndef KSU_EXPECTED_HASH
-KSU_EXPECTED_HASH := ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec
-endif
-ifndef KSU_MANAGER_PACKAGE
-KSU_MANAGER_PACKAGE := me.weishu.kernelsu.hide
-endif
+KSU_EXPECTED_SIZE ?= 0x342
+KSU_EXPECTED_HASH ?= ca40afa835e460be5dcfd0743296d95c3275b9e51673de8b6fd0a64665a83eec
 ```
 
-这与上游给自己写死官方身份（`0x033b` / `c371061b…`）的做法一致，只是值换成本项目的：上游 CI 因此无需任何改动即可构建本分支的 ko。用 `make KSU_EXPECTED_SIZE=… KSU_EXPECTED_HASH=… KSU_MANAGER_PACKAGE=…` 仍可覆盖。
+2026-10-16 起这里是「上游 v3.3.1 的开关形状 + 本项目的值」：上游把 `KSU_MANAGER_PACKAGE` 更名为 `KSU_PACKAGE_NAME`、新增 `KSU_IS_PR_BUILD`、把 `:=` 改成 `?=`，并删掉了副签名者 `EXPECTED_SIZE2/HASH2` 块。合并后的内核 C 代码只引用新名字（`kernel/core/init.c:95`、`kernel/manager/throne_tracker.c:41/76/84/302/344`、`kernel/supercall/dispatch.c:57/88`，`KSU_MANAGER_PACKAGE` 已无任何引用），所以必须用新名。上游自己的默认值是 `me.weishu.kernelsu` / `0x033b` / `c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6`，PR 构建用 `.pr` 后缀（上游 `me.weishu.kernelsu.pr12` 一类）；本分支不发布 PR 构建，恒为 `KSU_IS_PR_BUILD=0`。
+
+这与上游给自己写死官方身份的做法一致，只是值换成本项目的：上游 CI 因此无需任何改动即可构建本分支的 ko。用 `make KSU_PACKAGE_NAME=… KSU_EXPECTED_SIZE=… KSU_EXPECTED_HASH=…` 仍可覆盖。
 
 同一文件里驱动版本也收口到 `manager/gradle.properties`（2026-10-05 新增，见 `docs/DEVELOPMENT.md` 3.2）：
 
@@ -127,3 +135,18 @@ endif
 | x86_64 | android17-6.18 | 409792 | `81b659fe31fb5a1bb20a6d086bcc5ca080ccf71a41048472a5dfab46365a711f` |
 
 表内 16 个文件的 sha256 与 `ci/lkm` 上的产物一致（`git blob` 亦逐个核对），`_tools/verify-identity.ps1 -RequireSourceBuild` 对全部 16 个报 PASS；每个文件反汇编读出的驱动版本均为 32601（`_tools/identity-lib.ps1` 的 `Find-KsuVersion` 按指令形状定位常量，不依赖符号表）。
+
+## 8. 2026-10-16：把历史接到上游并合入 v3.3.1（已执行并推送）
+
+起点：导入提交 `3e09466`（`chore: import KernelSU v3.3.0 baseline`）是**无父的 root 提交**，与上游没有任何共同祖先，直接 `git merge` 需要 `--allow-unrelated-histories`，会把 224 个自有改动文件全算成冲突。
+
+1. **接历史**：`git replace --graft 3e09466f6816e551b4eec880a4463eb30c001e30 932014ab5b2c9b74a3d11e2ec4d17dd10fc9442e`（把导入提交的父改成上游 v3.3.0）。选 v3.3.0 作 graft 父是逐个算过 `v3.3.0..upstream/main` 全部 82 个提交对 `3e09466` 的文件差异数后定的：v3.3.0 最小（39，全是导入伪影），次小 `435ab65e8f` 是 54，再往后从 83 起。graft 后 `merge-base master v3.3.1` 精确等于 `932014ab`，冲突面从 224 收敛到 16。
+2. **合入 v3.3.1**：`git merge-tree --write-tree master v3.3.1` 得到合并树 `74344790b8550e039f789864921af80567b5504f` 与 **16 个冲突**（相对 285 项变更）；逐个解决后用 plumbing 建树提交：`read-tree <mergeTree>` → 解冲突 → `add -u` → `write-tree` = `00b333fe915ae9a8b3542a14ab2b48d1f0b6cc08` → `commit-tree 00b333fe -p ea64134892509d010b9364f79f51d68f499d7d6b -p 0c0fdb960178fa12d80d6cbcfdcb6ad8be6a865d` = **`4d824711fddbe50edcf50f1930ee43b74da9ec79`** → `update-ref refs/heads/master 4d824711`，最后 `read-tree HEAD` 把真实 index 同步成同一棵树（否则 `status` 会显示数百项「已修改」）。
+   > 为什么不用 `git merge`：本机文件系统上 lock→目标的 rename 退化成 copy+delete，而 delete 是静默空操作，同一把锁在**一次调用内**被取两次必然失败，`git merge` 恰好需要两次 `index.lock`；因此改用上述 plumbing 组合（过程见 `_logs/lockprobe-merge*.log`）。
+3. **推送**：`git push origin master` 因凭据 helper 也被交给 `sh.exe` 执行而不可用，改用**进程内 `Authorization: Basic base64(x-access-token:<token>)`** 请求头完成（`_dl/push-p7-header.ps1`），结果 `35095011..4d824711 master -> master`；随后用 `Move-Item` 把 `refs/replace/<3e09466>` 移出仓库（删除在本机是空操作），`for-each-ref refs/replace` 现为空。
+
+验证：`rev-list --parents -n1 master` = `4d824711 ea641348 0c0fdb96`（双亲）；`merge-base --is-ancestor refs/tags/v3.3.1 master` exit=0（v3.3.1 已是本分支祖先）；`status --porcelain` 为空；`diff --shortstat refs/tags/v3.3.1 master` = 257 files changed, 44669 insertions(+), 1670 deletions(-)。
+
+16 个冲突文件与解法：`Cargo.lock`、`userspace/ksud/Cargo.toml` 取上游 v3.3.1 原样；`scripts/ksubot.py`、`website/docs/pt_BR/guide/installation.md` 取上游内容并把 CRLF 规范化为 LF（这两个「全文件差异」其实是导入时换行规范化留下的伪影）；`userspace/ksud/src/main.rs` 取上游结构 + 保留 `assert_is_empty` allow；`kernel/Kbuild` 取上游开关形状 + 换回本项目身份默认值（第 6 节）；4 个 `ui/component/bottombar/*.kt` 保留本分支的 root-only 解锁逻辑（上游改用 `Natives.isFullFeatured()`，会让自编译 APK 丢掉完整特性）；`ui/MainActivity.kt`、`res/values-zh-rHK/strings.xml`、`ui/screen/module/ModuleMaterial.kt`、`ui/screen/superuser/SuperUserMaterial.kt` 逐 hunk 取并集；首页 `HomeMaterial.kt`/`HomeMiuix.kt`/`HomeScreen.kt`/`HomeUiState.kt`/`HomeViewModel.kt` 整体对齐上游 v3.3.1 后补回本分支的「接入 AI 助手」卡片（`actions.onOpenAiConfig`，字符串 `home_ai_assistant_title` / `home_ai_assistant_summary`）。
+
+未完成（另立任务）：16 个 `userspace/ksud/bin/**/*_kernelsu.ko`、两个 `libksud.so` 与 release APK 仍是按 **v3.3.0 / 32601** 从源码构建的产物，而源码已对齐 v3.3.1（上游 v3.3.1 官方 versionCode 是 **32680**）；借 DDK CI 重建后才能把 `manager/gradle.properties` 的 `KSU_VERSION_CODE` 提上去，在那之前 `_tools/verify-identity.ps1 -RequireSourceBuild` 仍按 32601 校验。

@@ -220,7 +220,7 @@ Write-Host "workspace=$ws\Cargo.toml"
 # project identity as its defaults (0x342 / ca40af... / me.weishu.kernelsu.hide), so upstream's
 # build-lkm.yml -> ddk-lkm.yml (DDK container) builds the fork module with no workflow change:
 #   make                                                                     # Kbuild defaults
-#   make KSU_EXPECTED_SIZE=... KSU_EXPECTED_HASH=... KSU_MANAGER_PACKAGE=... # explicit override
+#   make KSU_EXPECTED_SIZE=... KSU_EXPECTED_HASH=... KSU_PACKAGE_NAME=... # explicit override
 # The byte patch above is the fallback for machines without a DDK container (this one).
 $signerJson = Join-Path $ws '_tools\project-signer.json'
 . (Join-Path $PSScriptRoot 'identity-lib.ps1')  # Find-ExpectedSize / Find-LlvmObjdump (shared)

@@ -12,7 +12,7 @@ Checks
   3. ko identity: ELF64 aarch64, project cert SHA-256 literal x1,
      official (c371061b...) and AOSP debug (f9af24bd...) hashes absent,
      the aarch64 'cmp w21, #imm' immediate == the project cert DER length
-  4. provenance: KSU_MANAGER_PACKAGE compiled in ("path A", from source) or not
+  4. provenance: KSU_PACKAGE_NAME compiled in ("path A", from source) or not
      ("path B", byte-patched); --require-source-build turns a path-B asset into
      a failure instead of a warning
   5. optional: the ksu_manager_appid seed (--expect-appid N)
@@ -148,7 +148,7 @@ def main() -> int:
     ap.add_argument("--ko-name", default="kernelsu.ko", help="cpio member name of the module")
     ap.add_argument("--expect-cert-sha256", default=None, help="project cert SHA-256 (default: _tools/project-signer.json)")
     ap.add_argument("--expect-cert-size", type=int, default=None, help="project cert DER length (default: project-signer.json)")
-    ap.add_argument("--expect-package", default=None, help="KSU_MANAGER_PACKAGE (default: manager/gradle.properties)")
+    ap.add_argument("--expect-package", default=None, help="KSU_PACKAGE_NAME (default: manager/gradle.properties)")
     ap.add_argument("--expect-appid", type=int, default=None, help="expected ksu_manager_appid seed, e.g. 10627")
     ap.add_argument("--require-source-build", action="store_true",
                     help="fail (not just warn) when the package name is not compiled into the ko")

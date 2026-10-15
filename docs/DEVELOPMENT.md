@@ -2,7 +2,7 @@
 
 ## 0. 文档说明
 
-- 本文件记录 `KernelSU-v330` 工作树在内核层 KernelSU v3.3.0 基线上所做的改造：目标、设计决策、实现要点、已知问题与剩余工作。
+- 本文件记录 `KernelSU-v330` 工作树在内核层 KernelSU **v3.3.1** 基线上所做的改造：目标、设计决策、实现要点、已知问题与剩余工作。（2026-10-16 已用 `git replace --graft` 把导入提交 `3e09466` 接到上游 v3.3.0、再以真 merge 合入上游 v3.3.1，合并提交 `4d824711`；做法、16 个冲突的解法与验证见 `docs/upstream-alignment.md` §8。）
 - 记录对象是**仓库当前状态**，不是逐日流水。描述架构或行为时以仓库源码为准；涉及实现细节时给出仓库相对路径与函数/常量名，行号会随改动漂移，仅作定位参考。
 - 验收方式写成可复现的命令或操作步骤。仓库内无法独立核对的内容不写入，或显式标注「待验证」。
 - 相关文档：`docs/开发文档.md`（面向使用者与模块作者）、`docs/ai-console-quickstart.md`（AI 控制台快速上手）、`design/environment-hide-spec.md`（环境隐藏页设计规格）、`design/ai-console-spec.md`（AI 控制台设计规格）、`design/home-ui-review.md`（主页 UI 评审）。
@@ -13,9 +13,9 @@
 
 | 项 | 值 | 位置 |
 | --- | --- | --- |
-| 上游基线 | KernelSU v3.3.0（GPL-3.0） | 仓库根 |
+| 上游基线 | KernelSU v3.3.1（GPL-3.0）；合并提交 `4d824711`，`v3.3.1` 已是本分支祖先 | 仓库根 / `docs/upstream-alignment.md` §8 |
 | applicationId | `me.weishu.kernelsu.hide` | `manager/gradle.properties` 的 `KSU_PACKAGE_NAME` |
-| versionCode / versionName | `32601` / `v3.3.0+main` | 同上（`KSU_VERSION_CODE` / `KSU_VERSION_NAME`） |
+| versionCode / versionName | `32601` / `v3.3.1+main` | 同上（`KSU_VERSION_CODE` / `KSU_VERSION_NAME`）；code 仍钉 32601 是为匹配随包的原生资产（上游 v3.3.1 官方 code 是 32680） |
 | 管理器 Activity | `me.weishu.kernelsu.ui.MainActivity` | 未随 applicationId 改动 |
 | minSdk / targetSdk / compileSdk | 31 / 37 / 37 | `manager/build.gradle.kts`、`manager/app/build.gradle.kts` |
 
@@ -69,7 +69,7 @@
 
 对本分支的约束由此确定：release 包必须保持 v2-only 签名；必须使用与补丁 LKM 内置白名单一致的 keystore；证书 DER 长度必须精确匹配。任何一项不符，安装后设备都不认这个管理器（表现为界面显示未安装、底栏消失）。
 
-> 2026-10-05 实测教训：白名单若用**公开**的 Android debug 证书，设备上任何同样用 debug key 签名的应用都能竞争加冕。真机上 `moe.nb4a.debug`（uid 10523）抢先拿走王冠，管理器此后永远拿不到 root 授权（`perm.c` 的 `allowed_for_su()` 只看 `is_manager()`）。因此白名单必须是项目私钥，且编译 ko 时应同时定义 `KSU_MANAGER_PACKAGE`。完整根因、补丁与刷机步骤见 `docs/root-crown-appid-fix.md`。
+> 2026-10-05 实测教训：白名单若用**公开**的 Android debug 证书，设备上任何同样用 debug key 签名的应用都能竞争加冕。真机上 `moe.nb4a.debug`（uid 10523）抢先拿走王冠，管理器此后永远拿不到 root 授权（`perm.c` 的 `allowed_for_su()` 只看 `is_manager()`）。因此白名单必须是项目私钥，且编译 ko 时应同时定义 `KSU_PACKAGE_NAME`。完整根因、补丁与刷机步骤见 `docs/root-crown-appid-fix.md`。
 
 ### 3.2 驱动版本必须与管理器一致
 
@@ -84,8 +84,8 @@
 
 内核期望常量有两条改写路径：
 
-- 路径 A（正式路径）：身份常量写在 `kernel/Kbuild` 的默认值里（`KSU_EXPECTED_SIZE := 0x342`、`KSU_EXPECTED_HASH := ca40af…`、`KSU_MANAGER_PACKAGE := me.weishu.kernelsu.hide`），用上游 DDK 工作流（`.github/workflows/build-lkm.yml` → `ddk-lkm.yml`）直接从源码构建出「项目私钥 + 包名校验」都在的 ko。这与上游给自己写死官方身份的做法完全一致，不需要改任何工作流。
-- 路径 B（回退路径）：把补丁直接打进 LKM（`kernelsu.ko`），刷一次引导分区即可；本机没有 DDK 容器时用 `_tools/patch-init-boot.py`，产物与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_MANAGER_PACKAGE` 的包名校验仍是编译掉的。当前随仓库分发的 aarch64 资产已是路径 A 的产物（DDK CI 从源码构建，见下）。
+- 路径 A（正式路径）：身份常量写在 `kernel/Kbuild` 的默认值里（`KSU_EXPECTED_SIZE := 0x342`、`KSU_EXPECTED_HASH := ca40af…`、`KSU_PACKAGE_NAME := me.weishu.kernelsu.hide`），用上游 DDK 工作流（`.github/workflows/build-lkm.yml` → `ddk-lkm.yml`）直接从源码构建出「项目私钥 + 包名校验」都在的 ko。这与上游给自己写死官方身份的做法完全一致，不需要改任何工作流。
+- 路径 B（回退路径）：把补丁直接打进 LKM（`kernelsu.ko`），刷一次引导分区即可；本机没有 DDK 容器时用 `_tools/patch-init-boot.py`，产物与路径 A 在「证书哈希 + DER 长度」两项上等价，但 `KSU_PACKAGE_NAME` 的包名校验仍是编译掉的。当前随仓库分发的 aarch64 资产已是路径 A 的产物（DDK CI 从源码构建，见下）。
 
 补丁是对 ko 做等长字节替换：
 
@@ -477,7 +477,7 @@ cargo fmt
 
 1. 先准备 `manager/app/src/main/jniLibs/arm64-v8a/libksud.so`。
 2. `_tools/build-manager.ps1 -Task :app:assembleRelease`。
-3. 若需核对身份：`_tools/verify-identity.ps1 -Apk <apk>`；加 `-SelfTest` 可先验证检查自身既能失败也能通过，加 `-RequireSourceBuild` 则要求内置 LKM 资产必须源自源码构建（缺 `KSU_MANAGER_PACKAGE` 包名即失败）。第 2b 节逐个核对资产名是否真的编进了对应的 `libksud.so`（收编了资产却没重建二进制即硬失败），第 4 节对 `userspace/ksud/bin/**/*_kernelsu.ko` 的**每一个** KMI/ABI（当前 16 个）核对证书哈希 + DER 长度，并报出产地 `provenance=path A/path B`——2026-10-05 那次「刷了镜像也拿不到 root」的故障就出在这一项上。
+3. 若需核对身份：`_tools/verify-identity.ps1 -Apk <apk>`；加 `-SelfTest` 可先验证检查自身既能失败也能通过，加 `-RequireSourceBuild` 则要求内置 LKM 资产必须源自源码构建（缺 `KSU_PACKAGE_NAME` 包名即失败）。第 2b 节逐个核对资产名是否真的编进了对应的 `libksud.so`（收编了资产却没重建二进制即硬失败），第 4 节对 `userspace/ksud/bin/**/*_kernelsu.ko` 的**每一个** KMI/ABI（当前 16 个）核对证书哈希 + DER 长度，并报出产地 `provenance=path A/path B`——2026-10-05 那次「刷了镜像也拿不到 root」的故障就出在这一项上。
 4. 引导镜像另用独立复核：`_tools/verify-init-boot.py <img> --expect-appid <uid%100000> --require-source-build`（自带 boot 头解析 / LZ4 解码 / newc 遍历，不共用 producer 代码），核对 ko 身份、产地与冠位预置；对旧镜像同参数应当失败，用于确认判据本身有效。
 
 **资源包**

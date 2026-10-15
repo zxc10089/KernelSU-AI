@@ -4,7 +4,7 @@
 Why this tool exists
 --------------------
 The prebuilt kernelsu.ko bundled in this fork (userspace/ksud/bin/<arch>/*_kernelsu.ko)
-is compiled WITHOUT -DKSU_MANAGER_PACKAGE, so kernel/manager/apk_sign.c
+is compiled WITHOUT -DKSU_PACKAGE_NAME, so kernel/manager/apk_sign.c
 is_manager_apk() only compares the APK signing certificate (DER size + sha256).
 Any APK signed with the cert baked into that ko can be crowned by the /data/app
 walk in track_throne() -> search_manager() -> is_manager_apk(), and the winner

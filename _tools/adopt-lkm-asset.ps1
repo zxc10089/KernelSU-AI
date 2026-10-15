@@ -4,7 +4,7 @@
 # WHY: the fork ships a prebuilt userspace/ksud/bin/aarch64/android15-6.6_kernelsu.ko because this
 # machine has no Linux/DDK toolchain (no WSL, no Docker, no make/bash; Windows clang + NDK only).
 # The asset in the tree today is 'upstream v3.3.0 + two in-place constant replacements' (path B):
-# correct cert hash and DER length, but KSU_MANAGER_PACKAGE is compiled OUT, so a signer match alone
+# correct cert hash and DER length, but KSU_PACKAGE_NAME is compiled OUT, so a signer match alone
 # decides the crown. A build from source (path A) also carries the package-name check.
 #   path A: .github/workflows/build-lkm-fork.yml -> upstream build-lkm.yml matrix, 8 KMIs x 2 ABIs,
 #           artifacts <abi>-<kmi>-lkm fetched from the ci/lkm branch (identity comes from the
