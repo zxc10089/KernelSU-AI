@@ -97,11 +97,23 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force   # 本机默�
 
 已知未验证项（如实记录，已随真机实测更新）：
 
-- **`hiding-onekey.ps1 -Apply` 这条编排本身仍未端到端跑过**，但设备侧被它调用的动作已在一台真机上
-  手工验证：`su -c '/data/adb/ksud module install <zip>'` 对 pathmask 与 AlwaysStrong 各跑一次（均以
-  `Module installed successfully!` 结束），随后 `adb reboot`（`sys.boot_completed=1` 约 15 s），复核
-  `/data/adb/modules_update/*` 已清空、`/data/adb/modules/pathmask` 生效、`pathmask.ko` 出现在
-  `/proc/modules`（`pathmask 159744 0 - Live`）。
+- **`hiding-onekey.ps1 -Apply` 已在真机端到端跑通（2026-10-12）**：修掉两个真机缺陷后，
+  `-Apply -SoftRebootOnBlock` 一次运行 6/6 全绿（exit 0），计划 = hybrid_mount / zygisksu /
+  tricky_store / hma_oss_zygisk / pathmask-android15-6.6 / pathmask-scope。
+  - 缺陷 D1（已修）：暂存目录 `/data/local/tmp/hiding` 由 su 建出时属主是 `root:root 0755`，而每个
+    `adb push` 的身份是 shell(2000) ⇒ 5 个模块步骤一起报 `remote couldn't create file: Permission
+    denied`（报错指向 push，真因在目录属主；`mkdir -p` 对已存在目录仍返回 0，所以检查不漏就必踩）。
+    现在建完 `chown 2000:2000` + `chmod 700`（不用 0777：该目录还暂存 keybox.xml / target.txt），
+    并补一次以 push 身份的写探针，失败时一次报清前置条件。
+  - 缺陷 D2（已修）：metamodule（hybrid_mount）装好后 ksud 会拒绝后续安装，直到有一次重启把「待生效
+    变更」落地（横幅 `❌ Installation Blocked / A metamodule with custom installer is active /
+    Current state: Pending changes / Error: Metamodule installation blocked`）。原样透传会把同一段
+    横幅记成 4 个模块各自的失败。现在改写成「需先重启或 ksud soft-reboot 再继续安装，本步未安装」，
+    且默认**不**自动重启；只有显式 `-SoftRebootOnBlock` 才在本次运行内做 soft-reboot 边界（最多 2 次）
+    并重试该步——实测 `ksud soft-reboot` 即可清除该状态，暂存 zip 在 `/data/local/tmp` 跨 soft-reboot
+    存活，重试无需重新 push。
+  - 改这两个脚本的提醒：定点编辑（`edit` 之类）会**丢掉 UTF-8 BOM**，本次就丢过一次；改完必须
+    核验前三字节是 `EF BB BF`，否则 Windows PowerShell 5.1 会按 ANSI 解码中文并把引号改坏。
 - **仍未在真机跑过**：`-InstallPropsModule`、`-KeyboxPath`（§4.4 的 S7 原子写入）、`-TargetListPath`、
   `-SecurityPatchPath`，以及 `-Detectors` 的 `pm install`。
 - 所连设备本来就是完整隐藏栈（5 个模块 + AlwaysStrong + `selinux_hide=1` + 9/9 检测器），所以

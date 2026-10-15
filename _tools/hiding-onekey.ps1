@@ -65,6 +65,14 @@
     跳过资源包模块 / pathmask 的安装（那部分需要 root）。与 -Detectors 搭配可在没有 root 的设备上
     只做检测器安装：`-Apply -Detectors -SkipModules`。
 
+.PARAMETER SoftRebootOnBlock
+    metamodule（hybrid_mount）装好后 ksud 会拒绝后续安装，直到有一次重启让「待生效变更」落地
+    （设备实测横幅：❌ Installation Blocked / Current state: Pending changes / Error: Metamodule
+    installation blocked）。默认**不**自动重启：只把该步如实记为失败，原因改写成「需先重启或
+    ksud soft-reboot 再继续安装」。加本开关后，同一次运行内检测到阻塞就执行一次 ksud soft-reboot、
+    等设备回来并把该步重试（最多 2 次边界），使一次运行能走完 6 步。实测 soft-reboot 即可清除该状态，
+    且 /data/local/tmp 暂存文件在 soft-reboot 后仍在，重试无需重新 push。
+
 .PARAMETER Serial / AdbPath / RepoRoot
     设备序列号 / adb 路径 / 仓库根，省略时自动推断。
 
@@ -100,6 +108,7 @@ param(
     [switch]$PathMaskScope,
     [switch]$Detectors,
     [switch]$SkipModules,
+    [switch]$SoftRebootOnBlock,
     [switch]$Json,
     [switch]$SelfTest
 )
@@ -237,6 +246,62 @@ function Test-PmInstallDone {
     return [pscustomobject]@{ Ok = $ok; Why = $why; Output = $txt }
 }
 
+# ksud 在 metamodule（hybrid_mount）存在**待生效变更**时会拒绝后续安装，并打印一大段 ASCII 横幅：
+#   ❌ Installation Blocked / A metamodule with custom installer is active /
+#   Current state: Pending changes / Action required: Reboot to apply changes first /
+#   Error: Metamodule installation blocked
+# 这不是「这个模块装不上」：设备只是需要一次重启（ksud soft-reboot 也可以）才能继续装。
+# 把横幅原样当成安装失败原因会把归因指到错误方向——设备上实测：hybrid_mount 装完后，
+# 后续 4 个模块步骤全部拿到同一段横幅，看上去像 4 个模块各自装不上。
+function Test-HidingMetamoduleBlock {
+    param([string]$Output)
+    # 只看这一句：ksud 的 ASCII 横幅和紧邻的 `- Error: Metamodule installation blocked` 行都含它。
+    return ([string]$Output -match '(?i)Metamodule installation blocked')
+}
+
+function Get-HidingInstallFailureReason {
+    param([string]$Output)
+    $txt = [string]$Output
+    if (Test-HidingMetamoduleBlock $txt) {
+        return 'Metamodule 待生效变更阻塞（ksud: Pending changes）：需先重启或 ksud soft-reboot 再继续安装，本步未安装'
+    }
+    return $txt
+}
+
+# 阻塞之后该做什么（纯函数，自检直接断言真值表）。
+#   'retry-after-soft-reboot' = 开关显式打开且还有边界额度；'fail' = 如实记为失败。
+# 默认任何阻塞都只是 'fail'：自动重启会打断本次运行的中途状态，绝不能默认打开。
+function Get-HidingBlockedInstallAction {
+    param([bool]$IsMetamoduleBlock, [bool]$AllowSoftReboot, [int]$UsedSoftReboots, [int]$MaxSoftReboots = 2)
+    if (-not $IsMetamoduleBlock) { return 'fail' }
+    if (-not $AllowSoftReboot) { return 'fail' }
+    if ($UsedSoftReboots -ge $MaxSoftReboots) { return 'fail' }
+    return 'retry-after-soft-reboot'
+}
+
+# 一次 soft-reboot 边界：ksud soft-reboot -> 等 sys.boot_completed=1 -> 复核 root。
+# root 复核不过就 Ok=$false，调用方据此 fail-closed（绝不带着「可能没 root」继续写设备）。
+function Invoke-HidingSoftRebootBoundary {
+    param([string]$Adb, [string]$Serial, [int]$WaitSeconds = 180)
+    $ksud = Get-HidingKsudPath
+    $rb = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("$ksud soft-reboot")
+    if (-not $rb.Ok) { return @{ Ok = $false; Why = ('ksud soft-reboot 失败：' + $rb.Why) } }
+    $booted = $false
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 5
+        $b = Invoke-AdbShell -Adb $Adb -Serial $Serial -Command 'getprop sys.boot_completed'
+        if ((((@($b.Output)) -join '').Trim()) -ceq '1') { $booted = $true; break }
+    }
+    if (-not $booted) { return @{ Ok = $false; Why = ("soft-reboot 后 $WaitSeconds 秒内 sys.boot_completed 未变 1") } }
+    Start-Sleep -Seconds 5
+    $id = Invoke-SuShell -Adb $Adb -Serial $Serial -Command 'id'
+    if ($id.ExitCode -ne 0 -or (((@($id.Output)) -join ' ') -notmatch 'uid=0')) {
+        return @{ Ok = $false; Why = 'soft-reboot 后 root 复核失败（su 不可用或非 uid=0）' }
+    }
+    return @{ Ok = $true; Why = 'soft-reboot 完成，root 复核通过' }
+}
+
 # ------------------------------------------------------------------ planning
 
 function Get-OneKeyPlan {
@@ -337,6 +402,25 @@ function Invoke-HidingOnekeySelfTest {
     Assert-HidingTruth -Condition ((Test-PmInstallDone -ExitCode 0 -Output @('Success')).Ok) -Message 'onekey 裁决：exit 0 + Success 必须判为成功'
     Assert-HidingTruth -Condition (-not (Test-PmInstallDone -ExitCode 0 -Output @('Failure [INSTALL_FAILED_ALREADY_EXISTS: x]')).Ok) -Message 'onekey 裁决：exit 0 + Failure 必须判为失败（rooted 路径假成功回归）'
     Assert-HidingTruth -Condition (-not (Test-PmInstallDone -ExitCode 1 -Output @('Success')).Ok) -Message 'onekey 裁决：exit 1 + Success 必须判为失败'
+
+    # (f2) metamodule 待生效变更：ksud 的 ASCII 横幅必须被改写成「需要先重启/soft-reboot」，
+    # 否则 4 个模块步骤会各自把同一段横幅当成自己的安装失败原因（设备上实测踩到）。
+    $blocked = "  _  __`n❌ Installation Blocked`n│ A metamodule with custom installer is active`n│ Current state: Pending changes`n│ Action required: Reboot to apply changes first`n- Error: Metamodule installation blocked"
+    $whyBlocked = Get-HidingInstallFailureReason $blocked
+    Assert-HidingTruth -Condition ($whyBlocked -match '待生效变更阻塞') -Message 'onekey 归因：metamodule 阻塞横幅没被改写'
+    Assert-HidingTruth -Condition ($whyBlocked -notmatch 'Installation Blocked') -Message 'onekey 归因：metamodule 阻塞横幅被原样透传'
+    Assert-HidingTruth -Condition ($whyBlocked -match 'soft-reboot') -Message 'onekey 归因：阻塞原因里没有给出可执行动作（重启 / soft-reboot）'
+    Assert-HidingTruth -Condition ((Get-HidingInstallFailureReason 'no space left') -ceq 'no space left') -Message 'onekey 归因：普通失败原因被判成了阻塞'
+    Assert-HidingTruth -Condition ((Get-HidingInstallFailureReason '') -ceq '') -Message 'onekey 归因：空输出被改写'
+    Assert-HidingTruth -Condition (Test-HidingMetamoduleBlock '- Error: Metamodule installation blocked') -Message 'onekey 判定：ksud 阻塞行必须被识别'
+    Assert-HidingTruth -Condition (-not (Test-HidingMetamoduleBlock 'no space left on device')) -Message 'onekey 判定：普通失败不得被当成 metamodule 阻塞'
+
+    # (f3) metamodule 阻塞的边界决策真值表：默认不自动重启；只有「开关打开 + 还有额度」才 soft-reboot 重试。
+    Assert-HidingTruth -Condition ((Get-HidingBlockedInstallAction -IsMetamoduleBlock $true -AllowSoftReboot $false -UsedSoftReboots 0) -ceq 'fail') -Message 'onekey 边界：默认（不开开关）遇到阻塞必须如实失败'
+    Assert-HidingTruth -Condition ((Get-HidingBlockedInstallAction -IsMetamoduleBlock $false -AllowSoftReboot $true -UsedSoftReboots 0) -ceq 'fail') -Message 'onekey 边界：非阻塞失败不得触发重启'
+    Assert-HidingTruth -Condition ((Get-HidingBlockedInstallAction -IsMetamoduleBlock $true -AllowSoftReboot $true -UsedSoftReboots 0) -ceq 'retry-after-soft-reboot') -Message 'onekey 边界：开关打开且有额度必须重试'
+    Assert-HidingTruth -Condition ((Get-HidingBlockedInstallAction -IsMetamoduleBlock $true -AllowSoftReboot $true -UsedSoftReboots 2 -MaxSoftReboots 2) -ceq 'fail') -Message 'onekey 边界：额度用尽必须停止重试（不得无限重启）'
+    Assert-HidingTruth -Condition ((Get-HidingBlockedInstallAction -IsMetamoduleBlock $true -AllowSoftReboot $true -UsedSoftReboots 1 -MaxSoftReboots 2) -ceq 'retry-after-soft-reboot') -Message 'onekey 边界：额度未用尽应继续重试'
     Assert-HidingTruth -Condition (-not (Test-PmInstallDone -ExitCode -1 -Output @()).Ok) -Message 'onekey 裁决：su 不可用(-1) 必须判为失败'
 
     # (g) §4.4 完整性层（keybox 之外的另两块）：security patch 伪装 + target.txt 静态装入
@@ -470,17 +554,34 @@ $runModules = ((-not $SkipModules) -and ($planIds.Count -gt 0))
 $total = $(if ($runModules) { $planIds.Count } else { 0 }) + $extra.Count
 $idx = 0
 $ksud = Get-HidingKsudPath
+# metamodule 阻塞边界的额度（只有 -SoftRebootOnBlock 才用得到）
+$usedSoftReboots = 0
+$maxSoftReboots = 2
 
 # 暂存目录：有 root 用 su，没有 root 用 adb shell（/data/local/tmp 对 shell 本来就可写）。
+# 关键点：**push 是以 adb shell 用户（uid 2000）执行的**，而 su 建出来的目录属主是 root
+# （root:root 0755，首次运行的常见情形）。此时每个 adb push 都会报
+# "remote couldn't create file: Permission denied"，5 个模块步骤一起失败，报错却指向 push。
+# 所以建完必须把属主交回 shell 并收紧到 0700（不用 0777：本目录还暂存 keybox.xml /
+# target.txt，777 会让设备上别的应用能读或替换暂存的私钥）。
 $mk = $null
 if ($root.Ok) {
-    $mk = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("mkdir -p " + $StageDir)
+    $mk = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("mkdir -p " + $StageDir + " && chown 2000:2000 " + $StageDir + " && chmod 700 " + $StageDir)
 } else {
-    $rawMk = Invoke-AdbShell -Adb $Adb -Serial $Serial -Command ("mkdir -p " + $StageDir)
+    $rawMk = Invoke-AdbShell -Adb $Adb -Serial $Serial -Command ("mkdir -p " + $StageDir + " && chmod 700 " + $StageDir)
     $mk = [pscustomobject]@{ Ok = ($rawMk.ExitCode -eq 0); Why = ((@($rawMk.Output)) -join "`n").Trim() }
 }
 if (-not $mk.Ok) {
     Write-Host ('hiding-onekey: 无法创建暂存目录 ' + $StageDir + '：' + $mk.Why)
+    exit 5
+}
+# 可写性探针：以 push 的身份（adb shell）在目录里建一个临时文件再删掉。
+# 目录已存在但不可写时 mkdir -p 依然返回 0，不实测的话失败会推迟到每个模块步骤各报一次
+# push 错误（现象：5 步全挂、原因却指向 push）。这里一次性 fail-closed 并把原因写在报错里。
+$wprobe = Invoke-AdbShell -Adb $Adb -Serial $Serial -Command ("touch " + $StageDir + "/.write_probe && rm -f " + $StageDir + "/.write_probe")
+if ($wprobe.ExitCode -ne 0) {
+    $whyW = ((@($wprobe.Output)) -join "`n").Trim()
+    Write-Host ('hiding-onekey: 暂存目录 ' + $StageDir + ' 对 adb shell 不可写（push 必然失败）：' + $whyW)
     exit 5
 }
 
@@ -501,7 +602,26 @@ foreach ($entry in $planInfo.Plan) {
             $err = 'push 失败：' + $push.Why
         } else {
             $inst = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("$ksud module install $remote")
-            if (-not $inst.Ok) { $err = 'ksud module install 失败：' + $inst.Why }
+            if (-not $inst.Ok -and (Test-HidingMetamoduleBlock $inst.Why)) {
+                # hybrid_mount（metamodule）刚装好时 ksud 会阻塞后续安装，直到有一次重启落地该变更。
+                $act = Get-HidingBlockedInstallAction -IsMetamoduleBlock $true -AllowSoftReboot ([bool]$SoftRebootOnBlock) `
+                    -UsedSoftReboots $usedSoftReboots -MaxSoftReboots $maxSoftReboots
+                if ($act -ceq 'retry-after-soft-reboot') {
+                    $usedSoftReboots++
+                    Write-Host ('  · ' + $id + '：metamodule 待生效变更 → 第 ' + $usedSoftReboots + ' 次 soft-reboot 边界，等设备回来后重试本步')
+                    $bd = Invoke-HidingSoftRebootBoundary -Adb $Adb -Serial $Serial
+                    if (-not $bd.Ok) {
+                        $err = 'soft-reboot 边界失败：' + $bd.Why
+                    } else {
+                        # 暂存 zip 在 /data/local/tmp，soft-reboot 后仍在（设备实测），无需重新 push。
+                        $inst = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("$ksud module install $remote")
+                    }
+                }
+            }
+            if (-not $inst.Ok -and [string]::IsNullOrWhiteSpace($err)) {
+                $err = 'ksud module install 失败：' + (Get-HidingInstallFailureReason $inst.Why)
+            }
+            if ($inst.Ok) { $err = '' }
         }
     }
     if ([string]::IsNullOrWhiteSpace($err)) {
@@ -527,7 +647,7 @@ foreach ($x in $extra) {
                 $err = 'push 失败：' + $push.Why
             } else {
                 $inst = Invoke-DeviceSu -Adb $Adb -Serial $Serial -Command ("$ksud module install $StageDir/ksu_hide_props.zip")
-                if (-not $inst.Ok) { $err = 'ksud module install 失败：' + $inst.Why }
+                if (-not $inst.Ok) { $err = 'ksud module install 失败：' + (Get-HidingInstallFailureReason $inst.Why) }
             }
         } catch {
             $err = $_.Exception.Message
