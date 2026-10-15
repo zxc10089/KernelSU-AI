@@ -1,8 +1,7 @@
 package me.weishu.kernelsu.ui.component.bottombar
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
@@ -14,10 +13,10 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,7 +30,6 @@ import me.weishu.kernelsu.ui.icon.HideEnvironmentIcon
 import me.weishu.kernelsu.ui.theme.LocalEnableFloatingBottomBar
 import me.weishu.kernelsu.ui.theme.LocalEnableFloatingBottomBarBlur
 import me.weishu.kernelsu.ui.util.BlurredBar
-import me.weishu.kernelsu.ui.util.rootAvailable
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.BadgedBox
 import top.yukonga.miuix.kmp.basic.Icon
@@ -50,9 +48,7 @@ fun BottomBarMiuix(
     navigationBadge: NavigationBadgeState,
     modifier: Modifier,
 ) {
-    val isManager = Natives.isManager
-    // root-only unlock: a self-built APK is never crowned manager by the kernel
-    val fullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
+    val fullFeatured = Natives.isFullFeatured()
     if (!fullFeatured) return
 
     val mainState = LocalMainPagerState.current
@@ -87,24 +83,25 @@ fun BottomBarMiuix(
             )
         }
     } else {
+        val bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            .let { inset -> if (inset != 0.dp) 8.dp + inset else 28.dp }
         FloatingBottomBar(
             modifier = modifier
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = {},
-                )
-                .padding(bottom = 12.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
-            selectedIndex = { mainState.selectedPage },
+                .pointerInput(Unit) {
+                    detectTapGestures { }
+                }
+                .padding(start = 28.dp, end = 28.dp, bottom = bottomPadding),
+            selectedIndex = mainState.selectedPage,
             onSelected = { mainState.animateToPage(it) },
             backdrop = backdrop,
             tabsCount = items.size,
             isBlurEnabled = enableFloatingBottomBarBlur,
-        ) {
+        ) { activateTab ->
             items.forEachIndexed { index, item ->
                 FloatingBottomBarItem(
+                    selected = mainState.selectedPage == index,
                     onClick = {
-                        mainState.animateToPage(index)
+                        activateTab(index)
                     },
                     // FloatingBottomBar gives every item an exact width via weight(1f), so this floor
                     // must stay below the per-tab width: 4 tabs -> 74.0dp, 5 tabs (with the hide

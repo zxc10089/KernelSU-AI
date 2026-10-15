@@ -14,24 +14,38 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.add
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.DeveloperBoard
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -44,13 +58,12 @@ import androidx.compose.ui.unit.sp
 import me.weishu.kernelsu.KernelVersion
 import me.weishu.kernelsu.Natives
 import me.weishu.kernelsu.R
-import me.weishu.kernelsu.ui.icon.AiAssistantIcon
 import me.weishu.kernelsu.ui.component.WarningLevel
 import me.weishu.kernelsu.ui.component.dialog.rememberConfirmDialog
 import me.weishu.kernelsu.ui.component.miuix.WarningCard
 import me.weishu.kernelsu.ui.component.rebootlistpopup.RebootListPopupMiuix
+import me.weishu.kernelsu.ui.component.statustag.StatusTag
 import me.weishu.kernelsu.ui.theme.LocalEnableBlur
-import me.weishu.kernelsu.ui.theme.TypeTokens
 import me.weishu.kernelsu.ui.theme.isInDarkTheme
 import me.weishu.kernelsu.ui.util.BlurredBar
 import me.weishu.kernelsu.ui.util.module.LatestVersionInfo
@@ -68,8 +81,8 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Link
+import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.isDynamicColor
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -105,15 +118,15 @@ fun HomePagerMiuix(
                     .scrollEndHaptic()
                     .overScrollVertical()
                     .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .padding(horizontal = HomeDimens.PageHorizontal),
+                    .padding(horizontal = 12.dp),
                 contentPadding = innerPadding,
                 overscrollEffect = null,
             ) {
                 item {
                     Column(
-                        modifier = Modifier.padding(top = HomeDimens.PageTop),
+                        modifier = Modifier.padding(top = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(HomeDimens.CardSpacing),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         if (state.checkUpdateEnabled) {
                             UpdateCard(state = state, actions = actions)
@@ -123,45 +136,30 @@ fun HomePagerMiuix(
                         } else if (state.showKernelPrBuildWarning) {
                             WarningCard(stringResource(id = R.string.home_pr_kernel_warning), level = WarningLevel.Notice)
                         }
-                        if (state.showVersionMismatchWarning) {
-                            WarningCard(
-                                stringResource(
-                                    id = R.string.home_version_mismatch,
-                                    state.currentManagerVersionCode,
-                                    state.ksuVersion ?: 0
-                                )
-                            )
-                        }
                         if (state.showGkiWarning) {
                             WarningCard(stringResource(id = R.string.home_gki_warning), level = WarningLevel.Notice)
                         }
-                        if (state.showUAPIMisMatchWarning) {
+                        if (state.requiresNewKernel) {
                             WarningCard(
                                 stringResource(
-                                    id = R.string.uapi_mismatch,
-                                    state.managerUAPIVersion,
-                                    state.kernelUAPIVersion ?: 0,
+                                    id = if (state.canInstallKernelUpdate) R.string.require_kernel_version else R.string.require_kernel_version_gki
+                                ),
+                                onClick = if (state.canInstallKernelUpdate) actions.onInstallClick else null
+                            )
+                        }
+                        if (state.requiresNewManager) {
+                            WarningCard(
+                                stringResource(
+                                    id = R.string.require_manager_version
                                 )
                             )
                         }
-                        if (state.showRequireKernelWarning) {
-                            if (state.currentManagerVersionCode < (state.ksuVersion ?: 0)) {
-                                WarningCard(
-                                    stringResource(
-                                        id = R.string.require_manager_version,
-                                        state.currentManagerVersionCode,
-                                        state.ksuVersion ?: 0,
-                                    )
-                                )
-                            } else {
-                                WarningCard(
-                                    stringResource(
-                                        id = R.string.require_kernel_version,
-                                        state.ksuVersion ?: 0,
-                                        Natives.MINIMAL_SUPPORTED_KERNEL
-                                    )
-                                )
-                            }
+                        if (state.showLkmUpdate) {
+                            WarningCard(
+                                message = stringResource(R.string.home_lkm_update_available),
+                                level = WarningLevel.Notice,
+                                onClick = actions.onInstallClick,
+                            )
                         }
                         if (state.showRootWarning) {
                             WarningCard(stringResource(id = R.string.grant_root_failed))
@@ -170,13 +168,24 @@ fun HomePagerMiuix(
                             state = state,
                             actions = actions,
                         )
-                        SectionHeader(stringResource(R.string.home_section_device_kernel))
-                        InfoCard(systemInfo = state.systemInfo)
-                        SectionHeader(stringResource(R.string.home_section_support_learn))
-                        AiAssistantCard(onClick = actions.onOpenAiConfig)
-                        DonateCard(onOpenUrl = actions.onOpenUrl)
-                        LearnMoreCard(onOpenUrl = actions.onOpenUrl)
-                        Spacer(Modifier.height(bottomInnerPadding))
+                        InfoCard(
+                            systemInfo = state.systemInfo,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        SupportLinks(
+                            onOpenUrl = actions.onOpenUrl,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        AiAssistantCard(
+                            onClick = actions.onOpenAiConfig,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(
+                            Modifier.height(
+                                bottomInnerPadding + if (!Natives.isFullFeatured())
+                                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() else 0.dp
+                            )
+                        )
                     }
                 }
             }
@@ -231,34 +240,9 @@ private fun TopBar(
             actions = {
                 RebootListPopupMiuix()
             },
-            // P2-3: the large title left its 26dp default so that the whole page has the one
-            // 28dp text axis (HomeDimens.ContentAxis). The collapsed title is centred by the
-            // library itself and is left alone.
-            titlePadding = HomeDimens.ContentAxis,
             scrollBehavior = scrollBehavior
         )
     }
-}
-
-/**
- * Card-group / section header (P1-2).
- *
- * It sits on the card-content axis ([HomeDimens.CardInner] inside the page padding) so a header
- * lines up with the text of the cards it introduces, and it carries [HomeDimens.SectionTop] of
- * extra room above so that it visually belongs to the group below it rather than to the block
- * above it.
- */
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        fontSize = TypeTokens.sectionTitle.fontSize,
-        fontWeight = TypeTokens.sectionTitle.fontWeight,
-        color = colorScheme.onSurface,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = HomeDimens.CardInner, top = HomeDimens.SectionTop)
-    )
 }
 
 @Composable
@@ -309,30 +293,18 @@ private fun StatusCard(
                     ) {
                         Box {
                             Box(
-                                // P1-1: the success watermark used to be pushed 27dp/31dp past the
-                                // card's content box (offset(27.dp, 31.dp)), so its ring was cut by the
-                                // card's rounded corner. Keep the same bottom-end anchor but inset it
-                                // instead of pushing it outwards: an offset can only move the ring
-                                // further outside the clip, a padding cannot.
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(end = HomeDimens.StatusBadgeInsetEnd, bottom = HomeDimens.StatusBadgeInsetBottom),
+                                    .offset(27.dp, 31.dp),
                                 contentAlignment = Alignment.BottomEnd
                             ) {
                                 Icon(
-                                    modifier = Modifier.size(HomeDimens.StatusBadge),
+                                    modifier = Modifier.size(110.dp),
                                     imageVector = Icons.Rounded.CheckCircleOutline,
-                                    // P2-2 (design/home-ui-review.md §7): the hard-coded branch used a
-                                    // single green for both themes. Measured WCAG contrast of that green
-                                    // (#36D167) against the light card (#DFFAE4) is only 1.81:1 — below the
-                                    // 3:1 floor for non-text graphics — while against the dark card
-                                    // (#1A3825) it is a healthy 6.40:1. Keep the bright green on dark and
-                                    // use a darker green (3.85:1) on light. Text contrast is unaffected
-                                    // (15.41:1 light / 10.00:1 dark, both from the card's contentColor).
-                                    tint = when {
-                                        isDynamicColor -> colorScheme.primary.copy(alpha = 0.8f)
-                                        isInDarkTheme() -> Color(0xFF36D167)
-                                        else -> Color(0xFF1E8E3E)
+                                    tint = if (isDynamicColor) {
+                                        colorScheme.primary.copy(alpha = 0.8f)
+                                    } else {
+                                        Color(0xFF36D167)
                                     },
                                     contentDescription = null
                                 )
@@ -341,40 +313,59 @@ private fun StatusCard(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(
-                                            horizontal = HomeDimens.StatusModePaddingH,
-                                            vertical = HomeDimens.StatusModePaddingV
-                                        ),
+                                        .padding(16.dp, 10.dp),
                                     contentAlignment = Alignment.BottomStart,
                                 ) {
                                     Text(
                                         text = workingMode,
-                                        style = TypeTokens.statusMode,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium,
                                     )
                                 }
                             }
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(
-                                        horizontal = HomeDimens.StatusContentPaddingH,
-                                        vertical = HomeDimens.StatusContentPaddingV
-                                    ),
+                                    .padding(16.dp, 14.dp),
                                 contentAlignment = Alignment.TopStart,
                             ) {
                                 Column {
                                     Text(
                                         text = workingText,
-                                        style = TypeTokens.statusTitle,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.SemiBold,
                                     )
-                                    Spacer(Modifier.height(HomeDimens.StatusTitleGap))
-                                    Text(
-                                        text = stringResource(
-                                            R.string.home_working_version,
-                                            "${state.ksuVersion}-${state.kernelUAPIVersion}"
-                                        ),
-                                        style = TypeTokens.statusMeta,
-                                    )
+                                    Spacer(Modifier.height(1.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = stringResource(
+                                                R.string.home_working_version,
+                                                "${state.ksuVersion}-${state.kernelUAPIVersion}"
+                                            ),
+                                            modifier = Modifier.weight(1f, fill = false),
+                                            fontSize = 15.sp,
+                                        )
+                                        if (state.showCustomLkmBadge) {
+                                            Spacer(Modifier.width(8.dp))
+                                            StatusTag(
+                                                label = stringResource(R.string.home_lkm_custom),
+                                                contentColor = if (isDynamicColor) {
+                                                    colorScheme.onTertiaryContainer
+                                                } else if (isInDarkTheme()) {
+                                                    Color(0xFFB8E8C5)
+                                                } else {
+                                                    Color(0xFF164A29)
+                                                },
+                                                backgroundColor = if (isDynamicColor) {
+                                                    colorScheme.tertiaryContainer
+                                                } else if (isInDarkTheme()) {
+                                                    Color(0xFF315D3E)
+                                                } else {
+                                                    Color(0xFFB8E8C5)
+                                                },
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -392,7 +383,7 @@ private fun StatusCard(
                             }
                         },
                         showIndication = !state.isLateLoadMode,
-                        pressFeedbackType = PressFeedbackType.Sink
+                        pressFeedbackType = PressFeedbackType.Tilt
                     ) {
                         BasicComponent(
                             title = stringResource(R.string.home_not_installed),
@@ -427,7 +418,7 @@ private fun StatusCard(
                         }
                     },
                     showIndication = !state.isLateLoadMode,
-                    pressFeedbackType = PressFeedbackType.Sink
+                    pressFeedbackType = PressFeedbackType.Tilt
                 ) {
                     BasicComponent(
                         title = stringResource(R.string.home_unsupported),
@@ -448,116 +439,164 @@ private fun StatusCard(
 }
 
 @Composable
-private fun LearnMoreCard(
+private fun SupportLinks(
     onOpenUrl: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val url = stringResource(R.string.home_learn_kernelsu_url)
-    Card(modifier = Modifier.fillMaxWidth()) {
-        BasicComponent(
-            title = stringResource(R.string.home_learn_kernelsu),
-            summary = stringResource(R.string.home_click_to_learn_kernelsu),
-            endActions = {
-                Icon(
-                    imageVector = MiuixIcons.Link,
-                    tint = colorScheme.onSurface,
-                    contentDescription = null
-                )
-            },
-            onClick = { onOpenUrl(url) }
-        )
-    }
-}
+    val learnMoreUrl = stringResource(R.string.home_learn_kernelsu_url)
 
-@Composable
-private fun AiAssistantCard(onClick: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        BasicComponent(
-            title = stringResource(R.string.home_ai_assistant_title),
-            summary = stringResource(R.string.home_ai_assistant_summary),
-            endActions = {
-                Icon(
-                    imageVector = AiAssistantIcon,
-                    tint = colorScheme.onSurface,
-                    contentDescription = null
-                )
-            },
-            onClick = onClick
-        )
-    }
-}
-
-@Composable
-private fun DonateCard(onOpenUrl: (String) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        BasicComponent(
+    Card(modifier = modifier) {
+        ArrowPreference(
             title = stringResource(R.string.home_support_title),
             summary = stringResource(R.string.home_support_content),
-            endActions = {
+            startAction = {
                 Icon(
-                    imageVector = MiuixIcons.Link,
-                    tint = colorScheme.onSurface,
-                    contentDescription = null
+                    imageVector = Icons.Filled.VolunteerActivism,
+                    contentDescription = stringResource(R.string.home_support_title),
+                    modifier = Modifier.padding(end = 6.dp),
+                    tint = colorScheme.onBackground,
                 )
             },
-            onClick = { onOpenUrl("https://patreon.com/weishu") }
+            onClick = { onOpenUrl("https://patreon.com/weishu") },
+        )
+        ArrowPreference(
+            title = stringResource(R.string.home_learn_kernelsu),
+            summary = stringResource(R.string.home_click_to_learn_kernelsu),
+            startAction = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                    contentDescription = stringResource(R.string.home_learn_kernelsu),
+                    modifier = Modifier.padding(end = 6.dp),
+                    tint = colorScheme.onBackground,
+                )
+            },
+            onClick = { onOpenUrl(learnMoreUrl) },
         )
     }
 }
 
 @Composable
-private fun InfoCard(systemInfo: SystemInfo) {
-    @Composable
-    fun InfoText(
-        title: String,
-        content: String,
-        bottomPadding: Dp = HomeDimens.InfoRowBottom
-    ) {
-        Text(
-            text = title,
-            fontSize = TypeTokens.cardTitle.fontSize,
-            fontWeight = TypeTokens.cardTitle.fontWeight,
-            color = colorScheme.onSurface
-        )
-        Text(
-            text = content,
-            fontSize = TypeTokens.cardBody.fontSize,
-            color = colorScheme.onSurfaceVariantSummary,
-            modifier = Modifier.padding(top = 2.dp, bottom = bottomPadding)
+private fun AiAssistantCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(modifier = modifier) {
+        ArrowPreference(
+            title = stringResource(R.string.home_ai_assistant_title),
+            summary = stringResource(R.string.home_ai_assistant_summary),
+            startAction = {
+                Icon(
+                    imageVector = Icons.Rounded.SmartToy,
+                    contentDescription = stringResource(R.string.home_ai_assistant_title),
+                    modifier = Modifier.padding(end = 6.dp),
+                    tint = colorScheme.onBackground,
+                )
+            },
+            onClick = onClick,
         )
     }
+}
 
-    Card {
-        Column(
+@Composable
+private fun InfoCard(
+    systemInfo: SystemInfo,
+    modifier: Modifier = Modifier,
+) {
+    @Composable
+    fun InfoText(
+        icon: ImageVector,
+        title: String,
+        content: String,
+        bottomPadding: Dp = 24.dp
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(HomeDimens.CardInner)
+                .padding(bottom = bottomPadding),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            InfoText(title = stringResource(R.string.home_manager_version), content = systemInfo.managerVersion)
-            InfoText(title = stringResource(R.string.home_kernel), content = systemInfo.kernelVersion)
-            InfoText(title = stringResource(R.string.home_device_model), content = systemInfo.deviceModel)
-            InfoText(title = stringResource(R.string.home_fingerprint), content = systemInfo.fingerprint)
-            val selinuxDisplay = when (systemInfo.selinuxStatus) {
-                "Enforcing" -> stringResource(R.string.selinux_status_enforcing)
-                "Permissive" -> stringResource(R.string.selinux_status_permissive)
-                "Disabled" -> stringResource(R.string.selinux_status_disabled)
-                else -> stringResource(R.string.selinux_status_unknown)
-            }
-            InfoText(
-                title = stringResource(R.string.home_selinux_status),
-                content = selinuxDisplay,
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .size(24.dp),
+                tint = colorScheme.onSurface,
             )
-            val seccompDisplay = when (systemInfo.seccompStatus) {
-                -1 -> stringResource(R.string.seccomp_status_not_supported)
-                0 -> stringResource(R.string.seccomp_status_disabled)
-                1 -> stringResource(R.string.seccomp_status_strict)
-                2 -> stringResource(R.string.seccomp_status_filter)
-                else -> stringResource(R.string.seccomp_status_unknown)
+            Column {
+                Text(
+                    text = title,
+                    fontSize = MiuixTheme.textStyles.headline1.fontSize,
+                    fontWeight = FontWeight.Medium,
+                    color = colorScheme.onSurface,
+                )
+                Text(
+                    text = content,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    color = colorScheme.onSurfaceVariantSummary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
-            InfoText(
-                title = stringResource(R.string.home_seccomp_status),
-                content = seccompDisplay,
-                bottomPadding = 0.dp
-            )
+        }
+    }
+
+    val selinuxDisplay = when (systemInfo.selinuxStatus) {
+        "Enforcing" -> stringResource(R.string.selinux_status_enforcing)
+        "Permissive" -> stringResource(R.string.selinux_status_permissive)
+        "Disabled" -> stringResource(R.string.selinux_status_disabled)
+        else -> stringResource(R.string.selinux_status_unknown)
+    }
+    val seccompDisplay = when (systemInfo.seccompStatus) {
+        -1 -> stringResource(R.string.seccomp_status_not_supported)
+        0 -> stringResource(R.string.seccomp_status_disabled)
+        1 -> stringResource(R.string.seccomp_status_strict)
+        2 -> stringResource(R.string.seccomp_status_filter)
+        else -> stringResource(R.string.seccomp_status_unknown)
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                InfoText(
+                    icon = Icons.Filled.Tag,
+                    title = stringResource(R.string.home_manager_version),
+                    content = systemInfo.managerVersion,
+                )
+                InfoText(
+                    icon = Icons.Filled.DeveloperBoard,
+                    title = stringResource(R.string.home_kernel),
+                    content = systemInfo.kernelVersion,
+                )
+                InfoText(
+                    icon = Icons.Filled.Smartphone,
+                    title = stringResource(R.string.home_device_model),
+                    content = systemInfo.deviceModel,
+                )
+                InfoText(
+                    icon = Icons.Filled.Fingerprint,
+                    title = stringResource(R.string.home_fingerprint),
+                    content = systemInfo.fingerprint,
+                    bottomPadding = 0.dp,
+                )
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                InfoText(
+                    icon = Icons.Filled.Security,
+                    title = stringResource(R.string.home_selinux_status),
+                    content = selinuxDisplay,
+                )
+                InfoText(
+                    icon = Icons.Filled.FilterList,
+                    title = stringResource(R.string.home_seccomp_status),
+                    content = seccompDisplay,
+                    bottomPadding = 0.dp,
+                )
+            }
         }
     }
 }
@@ -633,9 +672,14 @@ private fun HomeScreenPreviewContent(
                 ),
                 actions = actions
             )
-            InfoCard(previewSystemInfo.copy(selinuxStatus = selinuxStatus))
-            DonateCard(onOpenUrl = {})
-            LearnMoreCard(onOpenUrl = {})
+            InfoCard(
+                systemInfo = previewSystemInfo.copy(selinuxStatus = selinuxStatus),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SupportLinks(
+                onOpenUrl = {},
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -674,10 +718,12 @@ private fun previewHomeScreenState(
     kernelVersion = KernelVersion(6, 1, 0),
     ksuVersion = ksuVersion,
     lkmMode = lkmMode,
+    isLkmBundled = lkmMode == true,
     isManager = true,
     isManagerPrBuild = false,
     isKernelPrBuild = false,
     requiresNewKernel = false,
+    requiresNewManager = false,
     isRootAvailable = ksuVersion != null,
     isSafeMode = isSafeMode,
     isLateLoadMode = isLateLoadMode,
@@ -687,5 +733,4 @@ private fun previewHomeScreenState(
     systemInfo = previewSystemInfo.copy(selinuxStatus = selinuxStatus),
     kernelUAPIVersion = 1,
     managerUAPIVersion = 1,
-    uapiMismatch = false,
 )

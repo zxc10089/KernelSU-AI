@@ -8,10 +8,9 @@
     clippy::doc_markdown,
     clippy::too_many_lines,
     clippy::cast_possible_wrap,
-    // 上游遗留：sepolicy.rs 的 derive(new) 展开会被新版 clippy 判为
-    // redundant_field_names，lkm_image.rs 的历史断言写法会被判为
-    // assert_is_empty。两处都在上游文件里，本分支不改动上游实现，
-    // 因此整条放行；本分支新增代码不要依赖这两条。
+    // 上游遗留：lkm_image.rs 的历史断言写法会被新版 clippy 判为 assert_is_empty，
+    // 该文件属于上游实现，本分支不改动，因此整条放行（redundant_field_names
+    // 自 v3.3.1 起已由上游自己在下面放行）。本分支新增代码不要依赖这一条。
     clippy::redundant_field_names,
     clippy::assert_is_empty
 )]
@@ -28,6 +27,7 @@ mod debug;
 mod defs;
 #[cfg(target_os = "android")]
 mod feature;
+mod feature_id;
 #[cfg(target_os = "android")]
 mod init_event;
 #[cfg(target_os = "android")]
@@ -52,6 +52,8 @@ mod resetprop;
 mod restorecon;
 #[cfg(target_os = "android")]
 mod sepolicy;
+#[cfg(target_os = "android")]
+mod soft_reboot;
 #[cfg(target_os = "android")]
 mod su;
 #[cfg(target_os = "android")]

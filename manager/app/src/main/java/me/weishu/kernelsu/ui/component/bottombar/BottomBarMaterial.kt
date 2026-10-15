@@ -47,6 +47,8 @@ fun BottomBarMaterial(navigationBadge: NavigationBadgeState) {
 
     if (!fullFeatured) return
 
+    val mainPagerState = LocalMainPagerState.current
+
     val items = listOf(
         Triple(R.string.home, Icons.Filled.Home, Icons.Outlined.Home),
         Triple(R.string.superuser, Icons.Filled.Shield, Icons.Outlined.Shield),

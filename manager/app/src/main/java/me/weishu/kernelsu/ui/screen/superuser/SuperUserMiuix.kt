@@ -392,7 +392,7 @@ fun SuperUserPagerMiuix(
                                         group.apps.forEach { app ->
                                             SimpleAppItem(
                                                 app = app,
-                                                matched = group.matchedPackageNames.contains(app.packageName),
+                                                matched = group.matchedIdentifiers.contains(app.displayIdentifier),
                                             )
                                         }
                                         Spacer(Modifier.height(6.dp))
@@ -425,8 +425,8 @@ fun SuperUserPagerMiuix(
         contentWindowInsets = WindowInsets.systemBars.add(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal)
     ) { innerPadding ->
         val layoutDirection = LocalLayoutDirection.current
+        val lazyListState = rememberLazyListState()
         searchStatus.SearchBox {
-            val lazyListState = rememberLazyListState()
             val refreshTick = remember { mutableIntStateOf(0) }
             val latestGroupedApps = rememberUpdatedState(uiState.groupedApps)
             val latestRefreshing = rememberUpdatedState(uiState.isRefreshing)
@@ -535,7 +535,7 @@ private fun SimpleAppItem(
         ) {
             BasicComponent(
                 title = app.label,
-                summary = app.packageName,
+                summary = app.displayIdentifier,
                 startAction = {
                     AppIconImage(
                         packageInfo = app.packageInfo,
@@ -609,7 +609,7 @@ private fun GroupItem(
                     text = if (group.apps.size > 1) {
                         stringResource(R.string.group_contains_apps, group.apps.size)
                     } else {
-                        group.primary.packageName
+                        group.primary.displayIdentifier
                     },
                     modifier = Modifier
                         .basicMarquee(),
