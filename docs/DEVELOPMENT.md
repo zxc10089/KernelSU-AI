@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | 上游基线 | KernelSU v3.3.1（GPL-3.0）；合并提交 `4d824711`，`v3.3.1` 已是本分支祖先 | 仓库根 / `docs/upstream-alignment.md` §8 |
 | applicationId | `me.weishu.kernelsu.hide` | `manager/gradle.properties` 的 `KSU_PACKAGE_NAME` |
-| versionCode / versionName | `32601` / `v3.3.1+main` | 同上（`KSU_VERSION_CODE` / `KSU_VERSION_NAME`）；code 仍钉 32601：随包原生资产已于 2026-10-17 按 v3.3.1 源码重建，pin 保持不变（上游 v3.3.1 官方 code 是 32680） |
+| versionCode / versionName | `32601` / `v3.3.1+main` | 同上（`KSU_VERSION_CODE` / `KSU_VERSION_NAME`）；code 仍钉 32601：随包原生资产已于 2026-10-16～17 按 v3.3.1 源码重建，pin 保持不变（上游 v3.3.1 官方 code 是 32680） |
 | 管理器 Activity | `me.weishu.kernelsu.ui.MainActivity` | 未随 applicationId 改动 |
 | minSdk / targetSdk / compileSdk | 31 / 37 / 37 | `manager/build.gradle.kts`、`manager/app/build.gradle.kts` |
 

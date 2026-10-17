@@ -151,20 +151,20 @@ endif
 
 2026-10-17 已补完（见第 9 节）：16 个 `userspace/ksud/bin/**/*_kernelsu.ko`、两个 `libksud.so` 与 release APK 都已按 **v3.3.1 源码 + pin 32601** 从源码重建，`_tools/verify-identity.ps1 -RequireSourceBuild` 全绿。
 
-## 9. 2026-10-17：按 v3.3.1 源码重建全部原生资产（已执行）
+## 9. 2026-10-16～17：按 v3.3.1 源码重建全部原生资产（已执行）
 
 触发：第 8 节合并后，仓库里的原生资产仍是 v3.3.0 线产物。目标是在 `KSU_VERSION_CODE=32601` 这个不变的身份 pin 下，把 16 个内核模块、两个 `libksud.so` 与管理器 APK 全部从 v3.3.1 源码重做一遍，并让身份闸门重新全绿。
 
-**内核模块（16 个）**：aarch64 与 x86_64 各 8 个 KMI（android12-5.10、13-5.10、13-5.15、14-5.15、14-6.1、15-6.6、16-6.12、17-6.18），按 `build-lkm-fork.yml` 同一套 `KSU_PACKAGE_NAME=me.weishu.kernelsu.hide`、`KSU_VERSION_CODE=32601` 参数构建，落回 `userspace/ksud/bin/<abi>/`。
+**内核模块（16 个，2026-10-16 01:55 落盘）**：aarch64 与 x86_64 各 8 个 KMI（android12-5.10、13-5.10、13-5.15、14-5.15、14-6.1、15-6.6、16-6.12、17-6.18），按 `build-lkm-fork.yml` 同一套 `KSU_PACKAGE_NAME=me.weishu.kernelsu.hide`、`KSU_VERSION_CODE=32601` 参数构建，落回 `userspace/ksud/bin/<abi>/`。
 
-**`libksud.so`（2 个）**：`_tools/build-ksud.ps1`，release 2m35s。`jniLibs/arm64-v8a/libksud.so` 6,271,264 B、`sha256=412964AA…`；`jniLibs/x86_64/libksud.so` 5,668,488 B、`sha256=0EB847A7…`。两者都内嵌 8 个模块（missing=0 / orphan=0），并各自只带一次 fork 包名（`me.weishu.kernelsu.hide` x1、裸上游 `me.weishu.kernelsu` x0、activity 后缀 x1）。
+**`libksud.so`（2 个，2026-10-17 21:43/21:45 落盘）**：`_tools/build-ksud.ps1`，release 2m35s。`jniLibs/arm64-v8a/libksud.so` 6,271,264 B、`sha256=412964AA…`；`jniLibs/x86_64/libksud.so` 5,668,488 B、`sha256=0EB847A7…`。两者都内嵌 8 个模块（missing=0 / orphan=0），并各自只带一次 fork 包名（`me.weishu.kernelsu.hide` x1、裸上游 `me.weishu.kernelsu` x0、activity 后缀 x1）。
 
-**管理器 APK**：`_tools/build-manager.ps1 -Task :app:assembleRelease`，7m29s，产物 `manager/app/build/outputs/apk/release/KernelSU_v3.3.1+main_32601-release.apk`（122,845,167 B），`package=me.weishu.kernelsu.hide`、`versionCode=32601`。该目录被 `manager/app/.gitignore:1:/build` 忽略，只作为本地产物。
+**管理器 APK（2026-10-17 22:15 落盘）**：`_tools/build-manager.ps1 -Task :app:assembleRelease`，7m29s，产物 `manager/app/build/outputs/apk/release/KernelSU_v3.3.1+main_32601-release.apk`（122,845,167 B），`package=me.weishu.kernelsu.hide`、`versionCode=32601`。该目录被 `manager/app/.gitignore:1:/build` 忽略，只作为本地产物。
 
 **构建前必须修的 Kotlin 冲突（v3.3.1 删了 `Natives.requireNewKernel()`）**：上游把该谓词挪进 `HomeViewModel` 算 `isManager && managerUAPIVersion > kernelUAPIVersion`，本分支仍有 6 个调用点。解法是在 `manager/app/src/main/java/me/weishu/kernelsu/ui/util/KsuCli.kt` 的 `rootAvailable()` 旁边保留唯一一份 `requiresNewKernel()`，6 个调用点改用它（`ui/MainActivity.kt`、`ui/component/bottombar/BottomBarMaterial.kt`、`NavigationRailMaterial.kt`、`NavigationRailMiuix.kt`、`ui/viewmodel/HideEnvironmentViewModel.kt` ×2）。同时发现 `BottomBarMaterial.kt`、`NavigationRailMaterial.kt` 里成对的重复声明（`val fullFeatured`、`val mainPagerState`）与缺失 import 是**合并前 fork `master` 就有的旧 bug**，一并修掉（很可能也是 CI `build-manager` 早先失败的原因）；`ModuleMaterial.kt` 补 `RebootListPopup` 的 import。
 
 **身份闸门要跟上的工具改动**：v3.3.1 的 `do_get_info` 不再把版本与 flags 打包成一个 qword，而是两个相邻 32 位字段分别用立即数写入（aarch64 `mov w12, #32601` + `stp w12, w8, [sp, #8]`；x86_64 `movl $32601, -24(%rbp)`），同函数里那个打包字 `0x500000007` 其实是 features/uapi 对。旧定位器只认打包形状，于是 16 个模块全被判成 `version=7 flags=0x5`。`_tools/identity-lib.ps1` 新增 `Find-WImmediateBefore` 与 `Get-SplitWordVersionCandidates`：先锚定结构体基址（aarch64 `add x1, sp, #N` / `mov x1, sp`；x86 `leaq -X(%rbp), %rsi` / `movq %rsp, %rsi`），只认落在基址（版本）与 `基址+4`（flags）上的 32 位存储；没有基址时退回「最低偏移即版本」的字段序规则。候选优先级改为 `split → literal-pool → packed immediate`。
 
-**验证**：`verify-identity.ps1 -SelfTest` = `SELF-TEST: PASSED`；`verify-identity.ps1 -Root . -WorkTree KernelSU-v330 -RequireSourceBuild` = `IDENTITY VERIFY: PASSED (0 warning(s))`，16/16 模块读回 `version=32601`。
+**验证**（含不经过闸门代码的独立核对：用 `llvm-objdump -d --no-show-raw-insn` 直接反汇编 `android15-6.6` 的 aarch64 模块，全文件只有两处 `32601` —— `df34: mov w12, #32601`、`e020: mov w12, #32601`；x86_64 模块为 `e169: movl $32601, -24(%rbp)`、`e249: movl $32601, -20(%rbp)`，而同函数的 `e1c7: movabsq $21474836487  # 0x500000007` 正是被旧定位器误读成 `version=7 flags=0x5` 的 features/uapi 字）：`verify-identity.ps1 -SelfTest` = `SELF-TEST: PASSED`；`verify-identity.ps1 -Root . -WorkTree KernelSU-v330 -RequireSourceBuild` = `IDENTITY VERIFY: PASSED (0 warning(s))`，16/16 模块读回 `version=32601`。
 
 **本机环境备忘**：① DSH 沙箱会封管道，Rust 构建脚本会永久卡在 `Compiling proc-macro2`——`cargo` 必须在无沙箱模式下跑（同一命令无沙箱 2m35s 完成）；② 由 DSH 直接 spawn 的 `pwsh` 是 ConstrainedLanguage，需要 .NET 静态调用的脚本要经 `cmd /c "<pwsh>" -File …` 启动；③ cargo 把 vendor 目录当不可变源，改过的 crate 必须移走 `target/**/.fingerprint` 与 `build` 才会重编；④ 4 个 vendored build script（`proc-macro2 1.0.107`、`anyhow 1.0.104`、`thiserror 2.0.20`/`2.0.21`）已打补丁容忍 Windows `ERROR_DIR_NOT_EMPTY=145`——本机 unlink 是静默空操作，`remove_dir_all` 对"非空"的判断必然失败。
