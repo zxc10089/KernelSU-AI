@@ -37,17 +37,16 @@ import me.weishu.kernelsu.ui.icon.HideEnvironmentIcon
 import me.weishu.kernelsu.ui.icon.HideEnvironmentIconOutlined
 import me.weishu.kernelsu.ui.theme.TypeTokens
 import me.weishu.kernelsu.ui.util.rootAvailable
+import me.weishu.kernelsu.ui.util.requiresNewKernel
 
 @Composable
 fun BottomBarMaterial(navigationBadge: NavigationBadgeState) {
     val isManager = Natives.isManager
     // root-only unlock: a self-built APK is never crowned manager by the kernel
-    val fullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
+    val fullFeatured = rootAvailable() && (!isManager || !requiresNewKernel())
     val mainPagerState = LocalMainPagerState.current
 
     if (!fullFeatured) return
-
-    val mainPagerState = LocalMainPagerState.current
 
     val items = listOf(
         Triple(R.string.home, Icons.Filled.Home, Icons.Outlined.Home),

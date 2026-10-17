@@ -14,6 +14,8 @@ import top.yukonga.miuix.kmp.basic.NavigationRailItem
 import top.yukonga.miuix.kmp.basic.NavigationRailValue
 import top.yukonga.miuix.kmp.basic.rememberNavigationRailState
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import me.weishu.kernelsu.ui.util.rootAvailable
+import me.weishu.kernelsu.ui.util.requiresNewKernel
 
 @Composable
 fun NavigationRailMiuix(
@@ -22,7 +24,7 @@ fun NavigationRailMiuix(
 ) {
     val isManager = Natives.isManager
     // root-only unlock: a self-built APK is never crowned manager by the kernel
-    val fullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
+    val fullFeatured = rootAvailable() && (!isManager || !requiresNewKernel())
     if (!fullFeatured) return
 
     val mainState = LocalMainPagerState.current

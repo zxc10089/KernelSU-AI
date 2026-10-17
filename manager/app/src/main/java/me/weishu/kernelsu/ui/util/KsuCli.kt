@@ -571,6 +571,12 @@ fun rootAvailable(): Boolean {
     return shell.isRoot
 }
 
+/**
+ * Upstream v3.3.1 dropped Natives.requireNewKernel(); the same predicate now lives in
+ * HomeViewModel as `isManager && managerUAPIVersion > kernelUAPIVersion`. The fork's
+ * root-only unlock path asks that question in four places, so keep one copy here.
+ */
+fun requiresNewKernel(): Boolean = Natives.isManager && Natives.managerUAPIVersion > Natives.kernelUAPIVersion
 suspend fun getCurrentKmi(): String = withContext(Dispatchers.IO) {
     val shell = getRootShell()
     val cmd = "boot-info current-kmi"

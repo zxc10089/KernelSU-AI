@@ -286,6 +286,154 @@ function Get-ImmediateVersionCandidates {
     return $found
 }
 
+function Find-WImmediateBefore {
+    param([string[]]$Lines, [int]$Index, [int]$Reg)
+    # Nearest 'mov w<Reg>, #imm' above Index, giving up when the register is written some other
+    # way in between (ldr, orr, csinc, ...), so a value from an unrelated block is never reused.
+    $rx = [regex]::new('^\s*[0-9a-fA-F]+:\s+([a-z][a-z0-9.]*)\s*(.*)$')
+    $skip = @('cmp', 'cmn', 'tst', 'str', 'stp', 'stur', 'adrp', 'adr', 'b', 'bl', 'cbz', 'cbnz', 'tbz', 'tbnz', 'ret', 'hint', 'nop')
+    $floor = [Math]::Max(0, $Index - 60)
+    for ($k = $Index - 1; $k -ge $floor; $k--) {
+        $m = $rx.Match($Lines[$k])
+        if (-not $m.Success) { continue }
+        $mn = $m.Groups[1].Value
+        $ops = $m.Groups[2].Value.Trim()
+        if ($mn -eq 'mov' -or $mn -eq 'movz' -or $mn -eq 'movk') {
+            $q = [regex]::Match($ops, '^w' + $Reg + ',\s+#(\d+)$')
+            if ($q.Success) { return [int]$q.Groups[1].Value }
+            continue
+        }
+        if ($skip -contains $mn) { continue }
+        if ($ops -match ('^[wx]' + $Reg + '[,\s]')) { return $null }
+    }
+    return $null
+}
+
+function Find-WImmediateBefore {
+    param([string[]]$Lines, [int]$Index, [int]$Reg)
+    # Nearest 'mov w<Reg>, #imm' above Index, giving up when the register is written some other
+    # way in between (ldr, orr, csinc, ...), so a value from an unrelated block is never reused.
+    $rx = [regex]::new('^\s*[0-9a-fA-F]+:\s+([a-z][a-z0-9.]*)\s*(.*)$')
+    $skip = @('cmp', 'cmn', 'tst', 'str', 'stp', 'stur', 'adrp', 'adr', 'b', 'bl', 'cbz', 'cbnz', 'tbz', 'tbnz', 'ret', 'hint', 'nop')
+    $floor = [Math]::Max(0, $Index - 60)
+    for ($k = $Index - 1; $k -ge $floor; $k--) {
+        $m = $rx.Match($Lines[$k])
+        if (-not $m.Success) { continue }
+        $mn = $m.Groups[1].Value
+        $ops = $m.Groups[2].Value.Trim()
+        if ($mn -eq 'mov' -or $mn -eq 'movz' -or $mn -eq 'movk') {
+            $q = [regex]::Match($ops, '^w' + $Reg + ',\s+#(\d+)(?:\s|$)')
+            if ($q.Success) { return [int]$q.Groups[1].Value }
+            continue
+        }
+        if ($skip -contains $mn) { continue }
+        if ($ops -match ('^[wx]' + $Reg + '[,\s]')) { return $null }
+    }
+    return $null
+}
+
+function Get-SplitWordVersionCandidates {
+    param([string[]]$Lines, [string]$Abi)
+    # get-info fills a struct whose version and flags are two ADJACENT 32-bit fields, then hands the
+    # struct to the supercall. The packed qword form above is gone from the current modules; the
+    # packed word that IS still there is the features/uapi pair (measured 0x500000007 -> "version=7
+    # flags=0x5"), so reading that as the version reports 7 for a correctly pinned module.
+    # The struct base is usually visible as the argument to the supercall -- aarch64 'add x1, sp,
+    # #8', x86_64 'leaq -24(%rbp), %rsi' or 'movq %rsp, %rsi' -- and the version is the field at
+    # base+0 with the flags at base+4:
+    #   new KMI : mov w12, #32601 | mov w8, #17 | csinc w8, w8, wzr, ne | stp w12, w8, [sp, #8]
+    #   old KMI : mov w8, #17 | str w8, [sp, #12] | mov w10, #32601 | str w10, [sp, #8]
+    #   x86_64  : movl $32601, -24(%rbp) / movl $32601, (%rsp)
+    # When the fields are copied out of .rodata rather than materialised (a 64-bit pair store from
+    # loaded registers, e.g. 'stp x12, x9, [sp, #8]'), nothing is produced here and the literal-pool
+    # path answers instead.
+    $found = New-Object System.Collections.ArrayList
+    $base = $null
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        if ($Abi -eq 'aarch64') {
+            $m = [regex]::Match($Lines[$i], '^\s*[0-9a-fA-F]+:\s+add\s+x1,\s+sp,\s+#(\d+)\s*$')
+            if ($m.Success) { $base = [int64]$m.Groups[1].Value; break }
+            $m = [regex]::Match($Lines[$i], '^\s*[0-9a-fA-F]+:\s+mov\s+x1,\s+sp\s*$')
+            if ($m.Success) { $base = [int64]0; break }
+        } else {
+            $m = [regex]::Match($Lines[$i], '^\s*[0-9a-fA-F]+:\s+leaq\s+(-?(?:0x[0-9a-fA-F]+|\d+))\(%rbp\),\s+%rsi\s*$')
+            if ($m.Success) {
+                $tok = $m.Groups[1].Value
+                $neg = $false
+                if ($tok.StartsWith('-')) { $neg = $true; $tok = $tok.Substring(1) }
+                $off = [int64]0
+                if ($tok.StartsWith('0x')) { $off = [int64][Convert]::ToInt64($tok.Substring(2), 16) } else { $off = [int64]$tok }
+                if ($neg) { $off = 0 - $off }
+                $base = $off
+                break
+            }
+            $m = [regex]::Match($Lines[$i], '^\s*[0-9a-fA-F]+:\s+movq\s+%rsp,\s+%rsi\s*$')
+            if ($m.Success) { $base = [int64]0; break }
+        }
+    }
+    # Offsets of 32-bit stores that carry a resolvable plain immediate. With a base these must land
+    # exactly on base or base+4; without one (the supercall was outlined into a tail label) the
+    # lowest offset wins, which is the same struct-order argument the literal-pool path uses.
+    $cand = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        $insn = Get-InsnAt -Lines $Lines -Index $i
+        if (-not $insn) { continue }
+        if ($Abi -eq 'aarch64') {
+            if ($insn.Mn -eq 'str') {
+                $q = [regex]::Match($insn.Ops, '^w(\d+),\s+\[sp,\s*#(\d+)\]$')
+                if (-not $q.Success) { continue }
+                $imm = Find-WImmediateBefore -Lines $Lines -Index $i -Reg ([int]$q.Groups[1].Value)
+                if ($null -eq $imm) { continue }
+                [void]$cand.Add(@{ Version = [int]$imm; Off = [int64]$q.Groups[2].Value; At = $Lines[$i].Trim() })
+                continue
+            }
+            if ($insn.Mn -eq 'stp') {
+                $q = [regex]::Match($insn.Ops, '^w(\d+),\s+w(\d+),\s+\[sp,\s*#(\d+)\]$')
+                if (-not $q.Success) { continue }
+                $off = [int64]$q.Groups[3].Value
+                $imm = Find-WImmediateBefore -Lines $Lines -Index $i -Reg ([int]$q.Groups[1].Value)
+                if ($null -ne $imm) { [void]$cand.Add(@{ Version = [int]$imm; Off = $off; At = $Lines[$i].Trim() }) }
+                $imm2 = Find-WImmediateBefore -Lines $Lines -Index $i -Reg ([int]$q.Groups[2].Value)
+                if ($null -ne $imm2) { [void]$cand.Add(@{ Version = [int]$imm2; Off = ($off + 4); At = $Lines[$i].Trim() }) }
+                continue
+            }
+        } else {
+            # objdump appends '# imm = 0x...' to these lines, so the match cannot be end-anchored.
+            $m = [regex]::Match($Lines[$i], '^\s*[0-9a-fA-F]+:\s+movl?\s+\$(\d+),\s+(-?(?:0x[0-9a-fA-F]+|\d+))?\(%r(bp|sp)\)')
+            if (-not $m.Success) { continue }
+            $tok = $m.Groups[2].Value
+            $off = [int64]0
+            if ($tok.Length -gt 0) {
+                $neg = $false
+                if ($tok.StartsWith('-')) { $neg = $true; $tok = $tok.Substring(1) }
+                if ($tok.StartsWith('0x')) { $off = [int64][Convert]::ToInt64($tok.Substring(2), 16) } else { $off = [int64]$tok }
+                if ($neg) { $off = 0 - $off }
+            }
+            [void]$cand.Add(@{ Version = [int]$m.Groups[1].Value; Off = $off; At = $Lines[$i].Trim() })
+        }
+    }
+    if ($cand.Count -eq 0) { return $found }
+    $ver = $null
+    $fl = 0
+    $at = ''
+    if ($null -ne $base) {
+        foreach ($c in $cand) {
+            if ($c.Off -eq $base) { $ver = $c.Version; $at = $c.At }
+            elseif ($c.Off -eq ($base + 4)) { $fl = $c.Version }
+        }
+    } else {
+        $pick = @($cand | Sort-Object { $_.Off })[0]
+        $ver = $pick.Version
+        $at = $pick.At
+        $sib = @($cand | Where-Object { $_.Off -eq ($pick.Off + 4) })
+        if ($sib.Count -gt 0) { $fl = $sib[0].Version }
+    }
+    if ($null -ne $ver) {
+        if ($ver -ge 1 -and $ver -le 400000) { [void]$found.Add(@{ Version = [int]$ver; Flags = [int]$fl; At = $at }) }
+    }
+    return $found
+}
+
 function Get-PoolVersionCandidates {
     param([string[]]$Lines, [string]$Abi, [byte[]]$Bytes, [hashtable]$Sections, [hashtable]$Symbols)
     # The other shape: the constant lives in a data section and the code loads it.
@@ -379,18 +527,20 @@ function Find-KsuVersion {
     $symbols = Get-KsuSymbolMap -Path $Path
     $immediate = New-Object System.Collections.ArrayList
     $pool = New-Object System.Collections.ArrayList
+    $split = New-Object System.Collections.ArrayList
     foreach ($b in $bodies) {
         $bodyLines = @($b.Lines)
         $abi = 'aarch64'
         if (($bodyLines -join ' ') -match ':\s+movabsq?\s+\$') { $abi = 'x86_64' }
         foreach ($c in @(Get-ImmediateVersionCandidates -Lines $bodyLines -Abi $abi)) { [void]$immediate.Add($c) }
-        if ($immediate.Count -eq 0) {
-            foreach ($c in @(Get-PoolVersionCandidates -Lines $bodyLines -Abi $abi -Bytes $bytes -Sections $sections -Symbols $symbols)) { [void]$pool.Add($c) }
-        }
+        foreach ($c in @(Get-SplitWordVersionCandidates -Lines $bodyLines -Abi $abi)) { [void]$split.Add($c) }
+        foreach ($c in @(Get-PoolVersionCandidates -Lines $bodyLines -Abi $abi -Bytes $bytes -Sections $sections -Symbols $symbols)) { [void]$pool.Add($c) }
     }
     $picked = @()
     $kind = ''
-    if ($immediate.Count -gt 0) { $picked = @($immediate); $kind = 'version/flags qword' } elseif ($pool.Count -gt 0) { $picked = @($pool); $kind = 'literal-pool constant' }
+    # A split 32-bit version field wins over the packed word: in the current kernel the packed
+    # word inside do_get_info is the features/uapi pair, so preferring it reports version=7.
+    if ($split.Count -gt 0) { $picked = @($split); $kind = 'split 32-bit version field' } elseif ($pool.Count -gt 0) { $picked = @($pool); $kind = 'literal-pool constant' } elseif ($immediate.Count -gt 0) { $picked = @($immediate); $kind = 'version/flags qword' }
     if ($picked.Count -eq 0) {
         return @{ Ok = $false; Version = 0; Flags = 0; Found = 'no version constant found in do_get_info*'; Why = 'instruction shape not recognised' }
     }

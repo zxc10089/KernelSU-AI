@@ -117,6 +117,8 @@ import top.yukonga.miuix.kmp.utils.PagerGestureNestedScrollConnection
 import top.yukonga.miuix.kmp.utils.PagerInterceptionMode
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.pagerGestureOverride
+import me.weishu.kernelsu.ui.util.rootAvailable
+import me.weishu.kernelsu.ui.util.requiresNewKernel
 
 class MainActivity : ComponentActivity() {
 
@@ -297,7 +299,7 @@ fun MainScreen(
     )
     val isManager = Natives.isManager
     // root-only unlock: a self-built APK is never crowned manager by the kernel
-    val isFullFeatured = rootAvailable() && (!isManager || !Natives.requireNewKernel())
+    val isFullFeatured = rootAvailable() && (!isManager || !requiresNewKernel())
     val pagerMode = PagerInterceptionMode.entries.getOrElse(pagerInterceptionMode) {
         PagerInterceptionMode.Native
     }

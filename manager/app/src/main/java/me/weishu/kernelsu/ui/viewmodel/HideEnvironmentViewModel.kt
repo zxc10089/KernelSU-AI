@@ -49,6 +49,7 @@ import me.weishu.kernelsu.ui.util.getRootShell
 import me.weishu.kernelsu.ui.util.getSELinuxStatusRaw
 import me.weishu.kernelsu.ui.util.rootAvailable
 import org.json.JSONObject
+import me.weishu.kernelsu.ui.util.requiresNewKernel
 
 class HideEnvironmentViewModel(
     private val repo: SettingsRepository = SettingsRepositoryImpl(),
@@ -170,7 +171,7 @@ class HideEnvironmentViewModel(
             val kernelRelease = System.getProperty("os.version").orEmpty()
 
             // root-only unlock: a self-built APK is never crowned manager by the kernel
-            val isFullFeatured = rootAvailable() && (!Natives.isManager || !Natives.requireNewKernel())
+            val isFullFeatured = rootAvailable() && (!Natives.isManager || !requiresNewKernel())
             val kernelUapiVersion = Natives.kernelUAPIVersion
             val managerUapiVersion = Natives.managerUAPIVersion
             val isSafeMode = Natives.isSafeMode
@@ -182,7 +183,7 @@ class HideEnvironmentViewModel(
             // (no KernelSU, uncrowned manager) was labelled "GKI built-in" merely because its
             // release string looks GKI-shaped (D-9). The crowned-kernel check is the same one
             // MainActivity uses before installing anything.
-            val kernelAnswered = Natives.isManager && !Natives.requireNewKernel()
+            val kernelAnswered = Natives.isManager && !requiresNewKernel()
             val runtimeMode = when {
                 !getKernelVersion().isGKI() -> HidingRuntimeMode.Unknown
                 isLkmMode -> HidingRuntimeMode.Lkm
